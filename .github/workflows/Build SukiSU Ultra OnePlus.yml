@@ -6,7 +6,7 @@ on:
         type: choice
         description: "配置文件"
         required: true
-        default: oneplus_ace2_pro_v
+        default: oneplus_13
         options:
           - oneplus_nord_ce4_lite_5g_v
           - oneplus_nord_ce4_v
@@ -57,17 +57,17 @@ on:
         type: string
         description: "分支名(不可留空)/自定义版本标识(留空不修改)"
         required: false
-        default: "susfs-main/Numbersf"
+        default: "susfs-main/"
       BUILD_TIME:
         type: string
         description: "自定义构建时间 (输入F使用当前时间)"
         required: false
-        default: "Mon Aug 18 09:30:24 UTC 2025"
+        default: "Tue Jul  1 19:48:18 UTC 2025"
       SUFFIX:
         type: string
         description: "自定义内核后缀 (不输入使用随机字符串)"
         required: false
-        default: ""
+        default: "8-g29d86c5fc9dd-abogki428889875-4k"
       FAST_BUILD:
         type: boolean
         description: "是否启用极速构建？"
@@ -77,15 +77,20 @@ on:
         type: boolean
         description: "是否启用内核模块(KPM)？"
         required: true
-        default: true
+        default: false
       SCHED:
         type: boolean
         description: "是否添加风驰驱动？"
         required: true
-        default: false
+        default: true
       ZRAM:
         type: boolean
         description: "是否添加更多ZRAM算法？"
+        required: true
+        default: false
+      CREATE_RELEASE:
+        type: boolean
+        description: "是否创建Release？"
         required: true
         default: false
 
@@ -210,6 +215,7 @@ jobs:
           echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
           echo "Selected SCHED: ${{ github.event.inputs.SCHED }}"
           echo "Selected ZRAM: ${{ github.event.inputs.ZRAM }}"
+          echo "Selected CREATE_RELEASE: ${{ github.event.inputs.CREATE_RELEASE }}"
           echo "-----------------------"
 
       - name: Check Disk Space
@@ -302,7 +308,8 @@ jobs:
           mkdir -p .repo/manifests
           FILE="${{ github.event.inputs.FILE }}"
           cp "$GITHUB_WORKSPACE/.repo/manifests_fallback/${FILE}.xml" ".repo/manifests/${FILE}.xml"
-          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/${{env.CPU}} -m "${FILE}.xml" --repo-rev=v2.16 --depth=1 --no-clone-bundle --no-tags
+          # 修复repo初始化问题，使用stable版本
+          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/${{env.CPU}} -m "${FILE}.xml" --repo-rev=stable --depth=1 --no-clone-bundle --no-tags
           repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
           for dir in kernel_platform/common kernel_platform/msm-kernel; do
@@ -701,7 +708,7 @@ jobs:
             echo "Using UTC time as fallback: $DATESTR"
           fi
           echo "KBUILD_BUILD_TIMESTAMP=${DATESTR}" >> "$GITHUB_ENV"
-          echo "KBUILD_BUILD_VERSION=1" >> "$GITHUB_ENV"
+          echo "KBUILD_BUILD_VERSION=1" >> $GITHUB_ENV
           cd kernel_workspace/kernel_platform/
           for f in common/scripts/mkcompile_h msm-kernel/scripts/mkcompile_h; do
             if [ -f "$f" ]; then
@@ -989,3 +996,84 @@ jobs:
 
       - name: Post-build Disk Check
         run: df -h
+
+      # 创建Release步骤
+      - name: Prepare Release Assets
+        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        id: prepare_release
+        run: |
+          # 创建临时目录存放所有文件
+          mkdir -p release-assets
+          
+          # 复制AnyKernel3内容
+          cp -r ./AnyKernel3/* ./release-assets/
+          
+          # 如果启用了ZRAM，复制ZRAM模块
+          if [ "${{ github.event.inputs.ZRAM }}" = "true" ] && [ "${{ steps.zram_find.outputs.upload }}" != "false" ]; then
+            mkdir -p ./release-assets/ZRAM-Module
+            cp -r ./ZRAM-Module/* ./release-assets/ZRAM-Module/
+          fi
+          
+          # 获取KSU版本和机型信息用于文件名
+          KSU_VER="${{ env.KSUVER }}"
+          MODEL="${{ steps.extract_info.outputs.value }}"
+          KERNEL_VERSION="${{ env.TKERNEL_VERSION }}"
+          SUFFIX="${{ steps.suffix.outputs.value }}"
+          
+          # 创建zip文件
+          RELEASE_NAME="SukiSUUltra_${KSU_VER}_${MODEL}_${KERNEL_VERSION}${SUFFIX}"
+          cd release-assets
+          zip -r "../${RELEASE_NAME}.zip" ./*
+          cd ..
+          
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+          echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          release_name: SukiSU Ultra for ${{ steps.extract_info.outputs.value }} (${{ env.TKERNEL_VERSION }})
+          body: |
+            SukiSU Ultra Kernel for ${{ steps.extract_info.outputs.value }}
+            
+            ## Build Information
+            - KernelSU Version: ${{ env.KSUVER }}
+            - Model: ${{ steps.extract_info.outputs.value }}
+            - Kernel Version: ${{ env.TKERNEL_VERSION }}
+            - Build Date: ${{ github.event.inputs.BUILD_TIME }}
+            
+            ## Features
+            - SukiSU Ultra with SUSFS support
+            - HOOK Method: ${{ github.event.inputs.HOOK }}
+            - ZRAM Support: ${{ github.event.inputs.ZRAM == 'true' && 'Enabled' || 'Disabled' }}
+            - KPM Support: ${{ github.event.inputs.KPM == 'true' && 'Enabled' || 'Disabled' }}
+            - SCHED Support: ${{ github.event.inputs.SCHED == 'true' && 'Enabled' || 'Disabled' }}
+            - Fast Build: ${{ github.event.inputs.FAST_BUILD == 'true' && 'Enabled' || 'Disabled' }}
+            
+            ## Installation
+            1. Download the zip file
+            2. Flash in recovery
+            3. Reboot
+            
+            ## Notes
+            - This kernel is only for ${{ steps.extract_info.outputs.value }}
+            - Make sure to backup your data before flashing
+            - Report issues to the developer
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ steps.prepare_release.outputs.RELEASE_FILE }}
+          asset_name: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
+          asset_content_type: application/zip

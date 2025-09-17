@@ -1019,12 +1019,10 @@ jobs:
       - name: Create Release
         if: ${{ env.CREATE_RELEASE == 'true' }}
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
-          release_name: SukiSU Ultra for ${{ steps.extract_info.outputs.value }} (${{ env.TKERNEL_VERSION }})
+          name: SukiSU Ultra for ${{ steps.extract_info.outputs.value }} (${{ env.TKERNEL_VERSION }})
           body: |
             SukiSU Ultra Kernel for ${{ steps.extract_info.outputs.value }}
             
@@ -1053,14 +1051,5 @@ jobs:
             - Report issues to the developer
           draft: false
           prerelease: false
-
-      - name: Upload Release Asset
-        if: ${{ env.CREATE_RELEASE == 'true' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ steps.prepare_release.outputs.RELEASE_FILE }}
-          asset_name: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
-          asset_content_type: application/zip
+          files: |
+            ./${{ steps.prepare_release.outputs.RELEASE_FILE }}

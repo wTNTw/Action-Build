@@ -72,7 +72,7 @@ on:
         type: string
         description: "启用功能 (逗号分隔: fast,kpm,sched,zram,release)"
         required: false
-        default: "fast,sched"
+        default: "fast,sched,release"
 
 jobs:
   build:

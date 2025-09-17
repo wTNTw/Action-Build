@@ -55,7 +55,7 @@ on:
           - NoN
       KSU_META:
         type: string
-        description: "分支名(不可留空)/自定义版本标识(留空不修改)"
+        description: "分支名/自定义版本标识 (格式: 分支名/自定义标识，留空不修改)"
         required: false
         default: "susfs-main/"
       BUILD_TIME:
@@ -68,41 +68,27 @@ on:
         description: "自定义内核后缀 (不输入使用随机字符串)"
         required: false
         default: "8-g29d86c5fc9dd-abogki428889875-4k"
-      FAST_BUILD:
-        type: boolean
-        description: "是否启用极速构建？"
-        required: true
-        default: true
-      KPM:
-        type: boolean
-        description: "是否启用内核模块(KPM)？"
-        required: true
-        default: false
-      SCHED:
-        type: boolean
-        description: "是否添加风驰驱动？"
-        required: true
-        default: true
-      ZRAM:
-        type: boolean
-        description: "是否添加更多ZRAM算法？"
-        required: true
-        default: false
-      CREATE_RELEASE:
-        type: boolean
-        description: "是否创建Release？"
-        required: true
-        default: false
+      FEATURES:
+        type: string
+        description: "启用功能 (逗号分隔: fast,kpm,sched,zram,release)"
+        required: false
+        default: "fast,sched"
 
 jobs:
   build:
-    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ github.event.inputs.SCHED == 'true' && ' [SCHED]' || '' }}${{ github.event.inputs.ZRAM == 'true' && ' [ZRAM]' || '' }}${{ github.event.inputs.KPM == 'true' && ' [KPM]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
+    name: Build ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CCACHE_MAXSIZE: 8G
+      # 解析FEATURES输入
+      FAST_BUILD: ${{ contains(github.event.inputs.FEATURES, 'fast') }}
+      KPM: ${{ contains(github.event.inputs.FEATURES, 'kpm') }}
+      SCHED: ${{ contains(github.event.inputs.FEATURES, 'sched') }}
+      ZRAM: ${{ contains(github.event.inputs.FEATURES, 'zram') }}
+      CREATE_RELEASE: ${{ contains(github.event.inputs.FEATURES, 'release') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -211,11 +197,12 @@ jobs:
           python3 -c "print(''.join(f'U+{ord(c):04X} ' for c in '''${{ github.event.inputs.SUFFIX }}'''))"
           echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
           echo "Selected HOOK: ${{ github.event.inputs.HOOK }}"
-          echo "Selected KPM: ${{ github.event.inputs.KPM }}"
-          echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
-          echo "Selected SCHED: ${{ github.event.inputs.SCHED }}"
-          echo "Selected ZRAM: ${{ github.event.inputs.ZRAM }}"
-          echo "Selected CREATE_RELEASE: ${{ github.event.inputs.CREATE_RELEASE }}"
+          echo "Selected FEATURES: ${{ github.event.inputs.FEATURES }}"
+          echo "FAST_BUILD: ${{ env.FAST_BUILD }}"
+          echo "KPM: ${{ env.KPM }}"
+          echo "SCHED: ${{ env.SCHED }}"
+          echo "ZRAM: ${{ env.ZRAM }}"
+          echo "CREATE_RELEASE: ${{ env.CREATE_RELEASE }}"
           echo "-----------------------"
 
       - name: Check Disk Space
@@ -276,7 +263,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ github.event.inputs.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-15
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ env.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-15
 
       - name: Initialize Ccache
         run: |
@@ -361,7 +348,7 @@ jobs:
           cd kernel_workspace
           SUFFIX="${{ github.event.inputs.SUFFIX }}"
           KANDROID_VERSION="${{ env.KANDROID_VERSION }}"
-          FAST_BUILD="${{ github.event.inputs.FAST_BUILD }}"
+          FAST_BUILD="${{ env.FAST_BUILD }}"
 
           for path in \
             kernel_platform/common/scripts/setlocalversion \
@@ -410,7 +397,7 @@ jobs:
         run: |
           cd kernel_workspace
           KANDROID_VERSION="${{ env.KANDROID_VERSION }}"
-          FAST_BUILD="${{ github.event.inputs.FAST_BUILD }}"
+          FAST_BUILD="${{ env.FAST_BUILD }}"
 
           # 生成随机数字和随机hash
           RANDOM_DIGIT=$(od -An -N1 -tu1 < /dev/urandom | tr -d '[:space:]' | awk '{print $1 % 11}')
@@ -524,7 +511,7 @@ jobs:
           cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
 
-          if [ "${{ github.event.inputs.ZRAM }}" = "true" ]; then
+          if [ "${{ env.ZRAM }}" = "true" ]; then
             echo "正在拉取zram补丁"
             cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./common/include/linux/
             cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./common/lib/
@@ -597,7 +584,7 @@ jobs:
           fi
 
       - name: Apply ZRAM
-        if: ${{ github.event.inputs.ZRAM == 'true' }}
+        if: ${{ env.ZRAM == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/common
           cp ../../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
@@ -620,7 +607,7 @@ jobs:
           echo "CONFIG_KSU=y" >> "$CONFIG_FILE"
 
           # KPM配置
-          if [ "${{ github.event.inputs.KPM }}" = "true" ]; then
+          if [ "${{ env.KPM }}" = "true" ]; then
             echo "CONFIG_KPM=y" >> "$CONFIG_FILE"
           fi
 
@@ -673,7 +660,7 @@ jobs:
           echo "CONFIG_IP_NF_TARGET_ECN=y" >> "$CONFIG_FILE"
 
           # ZRAM配置*
-          if [ "${{ github.event.inputs.ZRAM }}" = "true" ]; then
+          if [ "${{ env.ZRAM }}" = "true" ]; then
             echo "CONFIG_CRYPTO_LZ4HC=y" >> "$CONFIG_FILE"
             echo "CONFIG_CRYPTO_LZ4K=y" >> "$CONFIG_FILE"
             echo "CONFIG_CRYPTO_LZ4KD=y" >> "$CONFIG_FILE"
@@ -687,7 +674,7 @@ jobs:
 
       # 风驰内核，以 sm8750 为主体，其他 CPU 可能无效或者无法跑出
       - name: Add sched_ext
-        if: ${{ github.event.inputs.SCHED == 'true' }}
+        if: ${{ env.SCHED == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/
           git clone https://github.com/HanKuCha/sched_ext.git
@@ -722,7 +709,7 @@ jobs:
           done
 
       - name: Enable lto=thin For FAST
-        if: ${{ (env.KERNEL_VERSION == '5.10' || env.KERNEL_VERSION == '5.15') && github.event.inputs.FAST_BUILD == 'true' }}
+        if: ${{ (env.KERNEL_VERSION == '5.10' || env.KERNEL_VERSION == '5.15') && env.FAST_BUILD == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform
           DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
@@ -733,7 +720,7 @@ jobs:
           grep -q '^CONFIG_LTO_CLANG_THIN=y' "$DEFCONFIG" || echo 'CONFIG_LTO_CLANG_THIN=y' >> "$DEFCONFIG"
 
       - name: Build Kernel FAST
-        if: ${{ github.event.inputs.FAST_BUILD == 'true' }}
+        if: ${{ env.FAST_BUILD == 'true' }}
         id: fast_build
         run: |
           KERNEL_VERSION="${{ env.KERNEL_VERSION }}"
@@ -804,7 +791,7 @@ jobs:
           ccache -s
 
       - name: Fallback to Build Kernel
-        if: ${{ github.event.inputs.FAST_BUILD == 'false' || steps.fast_build.outputs.fallback == 'true' }}
+        if: ${{ env.FAST_BUILD == 'false' || steps.fast_build.outputs.fallback == 'true' }}
         run: |
           cd kernel_workspace
           if [ -f ./kernel_platform/build_with_bazel.py ]; then
@@ -841,7 +828,7 @@ jobs:
             cp "$image_path" ./AnyKernel3/Image
             cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
           fi
-          if [ -n "$dir2" ] && [ "${{ env.CPU }}" = "sm8750" ] && [ "${{ github.event.inputs.FAST_BUILD }}" = "false" ]; then
+          if [ -n "$dir2" ] && [ "${{ env.CPU }}" = "sm8750" ] && [ "${{ env.FAST_BUILD }}" = "false" ]; then
             echo "当前正在使用官方脚本构建 sm8750，需额外复制一些其它镜像文件：dtbo.img、system_dlkm.img。请注意，如果你在刷完官方脚本构建后想换成极速构建，请还原这些分区！"
             echo "You are currently building sm8750 with the official script. Additional image files will be copied: dtbo.img, system_dlkm.img. Please note: If you switch to fast build after flashing this build, make sure to restore these partitions!"
             for file in dtbo.img system_dlkm.erofs.img; do
@@ -858,7 +845,7 @@ jobs:
           fi
 
       - name: Apply patch_linux and replace Image
-        if: ${{ github.event.inputs.KPM == 'true' }}
+        if: ${{ env.KPM == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/out/Final-Image-Find
           curl -LO --retry 5 --retry-delay 2 --retry-connrefused https://raw.githubusercontent.com/Numbersf/Action-Build/SukiSU-Ultra/patches/patch_linux
@@ -921,7 +908,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ github.event.inputs.ZRAM == 'true' && '_LZ4KD' || '' }}${{ github.event.inputs.KPM == 'true' && '_KPM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ github.event.inputs.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM == 'true' && '_LZ4KD' || '' }}${{ env.KPM == 'true' && '_KPM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ env.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
@@ -930,7 +917,7 @@ jobs:
           path: ./AnyKernel3/*
 
       - name: Download and Unzip ZRAM
-        if: ${{ github.event.inputs.ZRAM == 'true' }}
+        if: ${{ env.ZRAM == 'true' }}
         id: zram_find
         run: |
           set -e
@@ -988,7 +975,7 @@ jobs:
           fi
 
       - name: Upload ZRAM Module
-        if: ${{ github.event.inputs.ZRAM == 'true' && steps.zram_find.outputs.upload != 'false' }}
+        if: ${{ env.ZRAM == 'true' && steps.zram_find.outputs.upload != 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ZRAM-Module_${{ env.KERNEL_VERSION }}_${{ steps.extract_info.outputs.value }}
@@ -999,7 +986,7 @@ jobs:
 
       # 创建Release步骤
       - name: Prepare Release Assets
-        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        if: ${{ env.CREATE_RELEASE == 'true' }}
         id: prepare_release
         run: |
           # 创建临时目录存放所有文件
@@ -1009,7 +996,7 @@ jobs:
           cp -r ./AnyKernel3/* ./release-assets/
           
           # 如果启用了ZRAM，复制ZRAM模块
-          if [ "${{ github.event.inputs.ZRAM }}" = "true" ] && [ "${{ steps.zram_find.outputs.upload }}" != "false" ]; then
+          if [ "${{ env.ZRAM }}" = "true" ] && [ "${{ steps.zram_find.outputs.upload }}" != "false" ]; then
             mkdir -p ./release-assets/ZRAM-Module
             cp -r ./ZRAM-Module/* ./release-assets/ZRAM-Module/
           fi
@@ -1030,7 +1017,7 @@ jobs:
           echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        if: ${{ env.CREATE_RELEASE == 'true' }}
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -1050,10 +1037,10 @@ jobs:
             ## Features
             - SukiSU Ultra with SUSFS support
             - HOOK Method: ${{ github.event.inputs.HOOK }}
-            - ZRAM Support: ${{ github.event.inputs.ZRAM == 'true' && 'Enabled' || 'Disabled' }}
-            - KPM Support: ${{ github.event.inputs.KPM == 'true' && 'Enabled' || 'Disabled' }}
-            - SCHED Support: ${{ github.event.inputs.SCHED == 'true' && 'Enabled' || 'Disabled' }}
-            - Fast Build: ${{ github.event.inputs.FAST_BUILD == 'true' && 'Enabled' || 'Disabled' }}
+            - ZRAM Support: ${{ env.ZRAM == 'true' && 'Enabled' || 'Disabled' }}
+            - KPM Support: ${{ env.KPM == 'true' && 'Enabled' || 'Disabled' }}
+            - SCHED Support: ${{ env.SCHED == 'true' && 'Enabled' || 'Disabled' }}
+            - Fast Build: ${{ env.FAST_BUILD == 'true' && 'Enabled' || 'Disabled' }}
             
             ## Installation
             1. Download the zip file
@@ -1068,7 +1055,7 @@ jobs:
           prerelease: false
 
       - name: Upload Release Asset
-        if: ${{ github.event.inputs.CREATE_RELEASE == 'true' }}
+        if: ${{ env.CREATE_RELEASE == 'true' }}
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

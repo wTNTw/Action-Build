@@ -6,7 +6,7 @@ on:
         type: choice
         description: "配置文件"
         required: true
-        default: oneplus_ace2_pro_v
+        default: oneplus_13
         options:
           - oneplus_nord_ce4_lite_5g_v
           - oneplus_nord_ce4_v
@@ -48,7 +48,7 @@ on:
         type: choice
         description: "下载SUSFS模块调用方式"
         required: true
-        default: NoN
+        default: CI
         options:
           - CI
           - Release
@@ -62,12 +62,12 @@ on:
         type: string
         description: "自定义构建时间 (输入F使用当前时间)"
         required: false
-        default: "Mon Aug 18 09:30:24 UTC 2025"
+        default: "Tue Jul  1 19:48:18 UTC 2025"
       SUFFIX:
         type: string
         description: "自定义内核后缀 (不输入使用随机字符串)"
         required: false
-        default: ""
+        default: "8-g29d86c5fc9dd-abogki428889875-4k"
       FAST_BUILD:
         type: boolean
         description: "是否启用极速构建？"
@@ -82,12 +82,17 @@ on:
         type: boolean
         description: "是否添加风驰驱动？"
         required: true
-        default: false
+        default: true
       ZRAM:
         type: boolean
         description: "是否添加更多ZRAM算法？"
         required: true
         default: false
+      FEATURES:
+        type: string
+        description: "启用功能 (逗号分隔: fast,kpm,sched,zram,release)"
+        required: false
+        default: "release"
 
 jobs:
   build:
@@ -98,6 +103,12 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CCACHE_MAXSIZE: 8G
+      # 解析FEATURES输入
+      FAST_BUILD: ${{ contains(github.event.inputs.FEATURES, 'fast') || github.event.inputs.FAST_BUILD == 'true' }}
+      KPM: ${{ contains(github.event.inputs.FEATURES, 'kpm') }}
+      SCHED: ${{ contains(github.event.inputs.FEATURES, 'sched') || github.event.inputs.SCHED == 'true' }}
+      ZRAM: ${{ contains(github.event.inputs.FEATURES, 'zram') || github.event.inputs.ZRAM == 'true' }}
+      CREATE_RELEASE: ${{ contains(github.event.inputs.FEATURES, 'release') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -206,10 +217,12 @@ jobs:
           python3 -c "print(''.join(f'U+{ord(c):04X} ' for c in '''${{ github.event.inputs.SUFFIX }}'''))"
           echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
           echo "Selected HOOK: ${{ github.event.inputs.HOOK }}"
-          echo "Selected LSM: ${{ github.event.inputs.LSM }}"
-          echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
-          echo "Selected SCHED: ${{ github.event.inputs.SCHED }}"
-          echo "Selected ZRAM: ${{ github.event.inputs.ZRAM }}"
+          echo "Selected FEATURES: ${{ github.event.inputs.FEATURES }}"
+          echo "FAST_BUILD: ${{ env.FAST_BUILD }}"
+          echo "KPM: ${{ env.KPM }}"
+          echo "SCHED: ${{ env.SCHED }}"
+          echo "ZRAM: ${{ env.ZRAM }}"
+          echo "CREATE_RELEASE: ${{ env.CREATE_RELEASE }}"
           echo "-----------------------"
 
       - name: Check Disk Space
@@ -270,7 +283,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ github.event.inputs.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-15
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ env.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-15
 
       - name: Initialize Ccache
         run: |
@@ -354,7 +367,7 @@ jobs:
           cd kernel_workspace
           SUFFIX="${{ github.event.inputs.SUFFIX }}"
           KANDROID_VERSION="${{ env.KANDROID_VERSION }}"
-          FAST_BUILD="${{ github.event.inputs.FAST_BUILD }}"
+          FAST_BUILD="${{ env.FAST_BUILD }}"
 
           for path in \
             kernel_platform/common/scripts/setlocalversion \
@@ -403,7 +416,7 @@ jobs:
         run: |
           cd kernel_workspace
           KANDROID_VERSION="${{ env.KANDROID_VERSION }}"
-          FAST_BUILD="${{ github.event.inputs.FAST_BUILD }}"
+          FAST_BUILD="${{ env.FAST_BUILD }}"
 
           # 生成随机数字和随机hash
           RANDOM_DIGIT=$(od -An -N1 -tu1 < /dev/urandom | tr -d '[:space:]' | awk '{print $1 % 11}')
@@ -535,7 +548,7 @@ jobs:
           cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
 
-          if [ "${{ github.event.inputs.ZRAM }}" = "true" ]; then
+          if [ "${{ env.ZRAM }}" = "true" ]; then
             echo "正在拉取zram补丁"
             cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./common/include/linux/
             cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./common/lib/
@@ -608,7 +621,7 @@ jobs:
           fi
 
       - name: Apply ZRAM
-        if: ${{ github.event.inputs.ZRAM == 'true' }}
+        if: ${{ env.ZRAM == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/common
           cp ../../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
@@ -621,7 +634,7 @@ jobs:
           echo 'lz4k_oplus_patch完成'
 
       - name: Apply SCHED
-        if: ${{ github.event.inputs.SCHED == 'true' }}
+        if: ${{ env.SCHED == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/common
           git clone https://github.com/HanKuCha/sched_ext.git
@@ -648,7 +661,9 @@ jobs:
           echo "CONFIG_KSU=y" >> "$CONFIG_FILE"
 
           # KPM配置
-          echo "CONFIG_KPM=y" >> "$CONFIG_FILE"
+          if [ "${{ env.KPM }}" = "true" ]; then
+            echo "CONFIG_KPM=y" >> "$CONFIG_FILE"
+          fi
 
           # HOOK配置
           if [ "${{ github.event.inputs.HOOK }}" = "kprobe" ]; then
@@ -699,7 +714,7 @@ jobs:
           echo "CONFIG_IP_NF_TARGET_ECN=y" >> "$CONFIG_FILE"
 
           # ZRAM配置*
-          if [ "${{ github.event.inputs.ZRAM }}" = "true" ]; then
+          if [ "${{ env.ZRAM }}" = "true" ]; then
             echo "CONFIG_CRYPTO_LZ4HC=y" >> "$CONFIG_FILE"
             echo "CONFIG_CRYPTO_LZ4K=y" >> "$CONFIG_FILE"
             echo "CONFIG_CRYPTO_LZ4KD=y" >> "$CONFIG_FILE"
@@ -729,7 +744,7 @@ jobs:
             echo "Using UTC time as fallback: $DATESTR"
           fi
           echo "KBUILD_BUILD_TIMESTAMP=${DATESTR}" >> "$GITHUB_ENV"
-          echo "KBUILD_BUILD_VERSION=1" >> "$GITHUB_ENV"
+          echo "KBUILD_BUILD_VERSION=1" >> $GITHUB_ENV
           cd kernel_workspace/kernel_platform/
           for f in common/scripts/mkcompile_h msm-kernel/scripts/mkcompile_h; do
             if [ -f "$f" ]; then
@@ -743,7 +758,7 @@ jobs:
           done
 
       - name: Enable lto=thin For FAST
-        if: ${{ (env.KERNEL_VERSION == '5.10' || env.KERNEL_VERSION == '5.15') && github.event.inputs.FAST_BUILD == 'true' }}
+        if: ${{ (env.KERNEL_VERSION == '5.10' || env.KERNEL_VERSION == '5.15') && env.FAST_BUILD == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform
           DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
@@ -754,7 +769,7 @@ jobs:
           grep -q '^CONFIG_LTO_CLANG_THIN=y' "$DEFCONFIG" || echo 'CONFIG_LTO_CLANG_THIN=y' >> "$DEFCONFIG"
 
       - name: Build Kernel FAST
-        if: ${{ github.event.inputs.FAST_BUILD == 'true' }}
+        if: ${{ env.FAST_BUILD == 'true' }}
         id: fast_build
         run: |
           KERNEL_VERSION="${{ env.KERNEL_VERSION }}"
@@ -825,7 +840,7 @@ jobs:
           ccache -s
 
       - name: Fallback to Build Kernel
-        if: ${{ github.event.inputs.FAST_BUILD == 'false' || steps.fast_build.outputs.fallback == 'true' }}
+        if: ${{ env.FAST_BUILD == 'false' || steps.fast_build.outputs.fallback == 'true' }}
         run: |
           cd kernel_workspace
           if [ -f ./kernel_platform/build_with_bazel.py ]; then
@@ -862,7 +877,7 @@ jobs:
             cp "$image_path" ./AnyKernel3/Image
             cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
           fi
-          if [ -n "$dir2" ] && [ "${{ env.CPU }}" = "sm8750" ] && [ "${{ github.event.inputs.FAST_BUILD }}" = "false" ]; then
+          if [ -n "$dir2" ] && [ "${{ env.CPU }}" = "sm8750" ] && [ "${{ env.FAST_BUILD }}" = "false" ]; then
             echo "当前正在使用官方脚本构建 sm8750，需额外复制一些其它镜像文件：dtbo.img、system_dlkm.img。请注意，如果你在刷完官方脚本构建后想换成极速构建，请还原这些分区！"
             echo "You are currently building sm8750 with the official script. Additional image files will be copied: dtbo.img, system_dlkm.img. Please note: If you switch to fast build after flashing this build, make sure to restore these partitions!"
             for file in dtbo.img system_dlkm.erofs.img; do
@@ -877,6 +892,17 @@ jobs:
               fi
             done
           fi
+
+      - name: Apply patch_linux and replace Image
+        if: ${{ env.KPM == 'true' }}
+        run: |
+          cd kernel_workspace/kernel_platform/out/Final-Image-Find
+          curl -LO --retry 5 --retry-delay 2 --retry-connrefused https://raw.githubusercontent.com/Numbersf/Action-Build/SukiSU-Ultra/patches/patch_linux
+          chmod +x patch_linux
+          ./patch_linux
+          rm -f Image
+          mv oImage Image
+          cp Image $GITHUB_WORKSPACE/AnyKernel3/Image
 
       - name: Download Latest SUSFS Module from CI
         if: ${{ github.event.inputs.SUSFS_CI == 'CI' }}
@@ -931,7 +957,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ github.event.inputs.ZRAM == 'true' && '_LZ4KD' || '' }}${{ github.event.inputs.LSM == 'true' && '_LSM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ github.event.inputs.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM == 'true' && '_LZ4KD' || '' }}${{ env.KPM == 'true' && '_KPM' || '' }}${{ github.event.inputs.LSM == 'true' && '_LSM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ env.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
@@ -940,7 +966,7 @@ jobs:
           path: ./AnyKernel3/*
 
       - name: Download and Unzip ZRAM
-        if: ${{ github.event.inputs.ZRAM == 'true' }}
+        if: ${{ env.ZRAM == 'true' }}
         id: zram_find
         run: |
           set -e
@@ -998,7 +1024,7 @@ jobs:
           fi
 
       - name: Upload ZRAM Module
-        if: ${{ github.event.inputs.ZRAM == 'true' && steps.zram_find.outputs.upload != 'false' }}
+        if: ${{ env.ZRAM == 'true' && steps.zram_find.outputs.upload != 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ZRAM-Module_${{ env.KERNEL_VERSION }}_${{ steps.extract_info.outputs.value }}
@@ -1006,3 +1032,74 @@ jobs:
 
       - name: Post-build Disk Check
         run: df -h
+
+      # 创建Release步骤
+      - name: Prepare Release Assets
+        if: ${{ env.CREATE_RELEASE == 'true' }}
+        id: prepare_release
+        run: |
+          # 创建临时目录存放所有文件
+          mkdir -p release-assets
+          
+          # 复制AnyKernel3内容
+          cp -r ./AnyKernel3/* ./release-assets/
+          
+          # 如果启用了ZRAM，复制ZRAM模块
+          if [ "${{ env.ZRAM }}" = "true" ] && [ "${{ steps.zram_find.outputs.upload }}" != "false" ]; then
+            mkdir -p ./release-assets/ZRAM-Module
+            cp -r ./ZRAM-Module/* ./release-assets/ZRAM-Module/
+          fi
+          
+          # 获取KSU版本和机型信息用于文件名
+          KSU_VER="${{ env.KSUVER }}"
+          MODEL="${{ steps.extract_info.outputs.value }}"
+          KERNEL_VERSION="${{ env.TKERNEL_VERSION }}"
+          SUFFIX="${{ steps.suffix.outputs.value }}"
+          
+          # 创建zip文件
+          RELEASE_NAME="SukiSUUltra_${KSU_VER}_${MODEL}_${KERNEL_VERSION}${SUFFIX}"
+          cd release-assets
+          zip -r "../${RELEASE_NAME}.zip" ./*
+          cd ..
+          
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+          echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        if: ${{ env.CREATE_RELEASE == 'true' }}
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          name: SukiSU Ultra for ${{ steps.extract_info.outputs.value }} (${{ env.TKERNEL_VERSION }})
+          body: |
+            SukiSU Ultra Kernel for ${{ steps.extract_info.outputs.value }}
+            
+            ## Build Information
+            - KernelSU Version: ${{ env.KSUVER }}
+            - Model: ${{ steps.extract_info.outputs.value }}
+            - Kernel Version: ${{ env.TKERNEL_VERSION }}
+            - Build Date: ${{ github.event.inputs.BUILD_TIME }}
+            
+            ## Features
+            - SukiSU Ultra with SUSFS support
+            - HOOK Method: ${{ github.event.inputs.HOOK }}
+            - ZRAM Support: ${{ env.ZRAM == 'true' && 'Enabled' || 'Disabled' }}
+            - KPM Support: ${{ env.KPM == 'true' && 'Enabled' || 'Disabled' }}
+            - SCHED Support: ${{ env.SCHED == 'true' && 'Enabled' || 'Disabled' }}
+            - Fast Build: ${{ env.FAST_BUILD == 'true' && 'Enabled' || 'Disabled' }}
+            - LSM Support: ${{ github.event.inputs.LSM == 'true' && 'Enabled' || 'Disabled' }}
+            
+            ## Installation
+            1. Download the zip file
+            2. Flash in recovery
+            3. Reboot
+            
+            ## Notes
+            - This kernel is only for ${{ steps.extract_info.outputs.value }}
+            - Make sure to backup your data before flashing
+            - Report issues to the developer
+          draft: false
+          prerelease: false
+          files: |
+            ./${{ steps.prepare_release.outputs.RELEASE_FILE }}

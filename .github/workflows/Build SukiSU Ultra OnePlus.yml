@@ -57,7 +57,7 @@ on:
         type: string
         description: "分支名(必填)/自定义版本标识(输入F不修改)/调整提交hash(留空不修改)"
         required: false
-        default: "susfs-main/Numbersf/"
+        default: "susfs-main/"
       BUILD_TIME:
         type: string
         description: "自定义构建时间 (输入F使用当前时间)"
@@ -88,11 +88,6 @@ on:
         description: "是否添加更多ZRAM算法？"
         required: true
         default: false
-      FEATURES:
-        type: string
-        description: "启用功能 (逗号分隔: fast,kpm,sched,zram,release)"
-        required: false
-        default: "release"
 
 jobs:
   build:
@@ -103,12 +98,13 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CCACHE_MAXSIZE: 8G
-      # 解析FEATURES输入
-      FAST_BUILD: ${{ contains(github.event.inputs.FEATURES, 'fast') || github.event.inputs.FAST_BUILD == 'true' }}
-      KPM: ${{ contains(github.event.inputs.FEATURES, 'kpm') }}
-      SCHED: ${{ contains(github.event.inputs.FEATURES, 'sched') || github.event.inputs.SCHED == 'true' }}
-      ZRAM: ${{ contains(github.event.inputs.FEATURES, 'zram') || github.event.inputs.ZRAM == 'true' }}
-      CREATE_RELEASE: ${{ contains(github.event.inputs.FEATURES, 'release') }}
+      # 直接使用输入参数
+      FAST_BUILD: ${{ github.event.inputs.FAST_BUILD == 'true' }}
+      KPM: true  # 默认启用KPM
+      SCHED: ${{ github.event.inputs.SCHED == 'true' }}
+      ZRAM: ${{ github.event.inputs.ZRAM == 'true' }}
+      CREATE_RELEASE: true  # 始终创建release
+      LSM: ${{ github.event.inputs.LSM == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -217,12 +213,12 @@ jobs:
           python3 -c "print(''.join(f'U+{ord(c):04X} ' for c in '''${{ github.event.inputs.SUFFIX }}'''))"
           echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
           echo "Selected HOOK: ${{ github.event.inputs.HOOK }}"
-          echo "Selected FEATURES: ${{ github.event.inputs.FEATURES }}"
           echo "FAST_BUILD: ${{ env.FAST_BUILD }}"
           echo "KPM: ${{ env.KPM }}"
           echo "SCHED: ${{ env.SCHED }}"
           echo "ZRAM: ${{ env.ZRAM }}"
           echo "CREATE_RELEASE: ${{ env.CREATE_RELEASE }}"
+          echo "LSM: ${{ env.LSM }}"
           echo "-----------------------"
 
       - name: Check Disk Space
@@ -643,7 +639,7 @@ jobs:
           cd ./kernel/sched
 
       - name: Apply LSM_BBG
-        if: ${{ github.event.inputs.LSM == 'true' }}
+        if: ${{ env.LSM == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform/common
           echo "正在启用内核级基带保护支持…"
@@ -724,7 +720,7 @@ jobs:
           fi
 
           # LSM配置*
-          if [ "${{ github.event.inputs.LSM }}" = "true" ]; then
+          if [ "${{ env.LSM }}" = "true" ]; then
             echo "CONFIG_BBG=y" >> "$CONFIG_FILE"
           fi
 
@@ -957,7 +953,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ env.ZRAM == 'true' && '_LZ4KD' || '' }}${{ env.KPM == 'true' && '_KPM' || '' }}${{ github.event.inputs.LSM == 'true' && '_LSM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ env.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM == 'true' && '_LZ4KD' || '' }}${{ env.KPM == 'true' && '_KPM' || '' }}${{ env.LSM == 'true' && '_LSM' || '' }}${{ github.event.inputs.HOOK == 'kprobe' && '_KP' || github.event.inputs.HOOK == 'manual' && '_VFS' || github.event.inputs.HOOK == 'tracepoint' && '_TP' || '' }}${{ env.SCHED== 'true' && '_SCHED' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
@@ -1035,7 +1031,6 @@ jobs:
 
       # 创建Release步骤
       - name: Prepare Release Assets
-        if: ${{ env.CREATE_RELEASE == 'true' }}
         id: prepare_release
         run: |
           # 创建临时目录存放所有文件
@@ -1066,7 +1061,6 @@ jobs:
           echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        if: ${{ env.CREATE_RELEASE == 'true' }}
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
@@ -1088,7 +1082,7 @@ jobs:
             - KPM Support: ${{ env.KPM == 'true' && 'Enabled' || 'Disabled' }}
             - SCHED Support: ${{ env.SCHED == 'true' && 'Enabled' || 'Disabled' }}
             - Fast Build: ${{ env.FAST_BUILD == 'true' && 'Enabled' || 'Disabled' }}
-            - LSM Support: ${{ github.event.inputs.LSM == 'true' && 'Enabled' || 'Disabled' }}
+            - LSM Support: ${{ env.LSM == 'true' && 'Enabled' || 'Disabled' }}
             
             ## Installation
             1. Download the zip file

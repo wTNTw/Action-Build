@@ -6,7 +6,7 @@ on:
         type: choice
         description: "配置文件"
         required: true
-        default: oneplus_ace2_pro_b
+        default: oneplus_13_b
         options:
           - oneplus_nord_n30_se_5g_v
           - oneplus_10r_v
@@ -101,12 +101,12 @@ on:
         type: string
         description: "自定义构建时间(输入F使用UTCT或-1关闭)"
         required: false
-        default: "Fri Dec 12 11:37:03 UTC 2025"
+        default: "Mon Dec 8 04:00:43 UTC 2025"
       KSU_META:
         type: string
         description: "分支名(必填)/自定义版本标识(留空不修改)/回退分支提交哈希版本(留空不修改)"
         required: false
-        default: "main/Numbersf/"
+        default: "main//"
       LZ4_UPDATE:
         type: boolean
         description: "(危险)是否升级LZ4到上游最新？"
@@ -116,12 +116,12 @@ on:
         type: string
         description: "ZRAM(0关闭1开启)/算法名/大小"
         required: true
-        default: "0/lz4kd/8589934592"
+        default: "0/lz4kd/12884901888"
       SUFFIX:
         type: string
         description: "自定义内核后缀(不输入使用RAND_STR或-1关闭)"
         required: false
-        default: ""
+        default: "8-g7e1f3c083cc6-abogki467167594-4k"
       SUBLEVEL:
         description: "自定义内核等级欺骗(SUBLEVEL)"
         required: false
@@ -150,12 +150,12 @@ on:
         type: boolean
         description: "是否添加Unicode不可见字码点绕过读取漏洞修复？"
         required: true
-        default: false
+        default: true
       SCHED_HMBIRD:
         type: boolean
         description: "是否添加风驰驱动1.0？"
         required: true
-        default: false
+        default: true
       DROID_SPACES:
         type: boolean
         description: "是否添加轻量级Linux容器支持(DroidSpaces)？"
@@ -165,7 +165,7 @@ on:
         type: boolean
         description: "是否添加Re-Kernel？"
         required: true
-        default: false
+        default: true
       SUSFS_DEV:
         type: boolean
         description: "是否拉取SUSFS-DEV分支？"
@@ -1623,6 +1623,49 @@ jobs:
         run: |
           echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}" >> $GITHUB_OUTPUT
 
+      - name: Generate Build Metadata
+        run: |
+          cat > metadata.json << 'JSONEOF'
+{
+  "KSUVER": "${{ env.KSUVER }}",
+  "TKERNEL_VERSION": "${{ env.TKERNEL_VERSION }}",
+  "KERNEL_VERSION": "${{ env.KERNEL_VERSION }}",
+  "MANIFEST_REPO": "${{ env.MANIFEST_REPO }}",
+  "MANIFEST_BRANCH": "${{ env.MANIFEST_BRANCH }}",
+  "SUSFS_COMMIT_HASH": "${{ env.SUSFS_COMMIT_HASH }}",
+  "BRANCH_NAME": "${{ github.event.inputs.KSU_META }}",
+  "ZRAM_ALGO_U": "${{ env.ZRAM_ALGO_U }}",
+  "FILE": "${{ github.event.inputs.FILE }}",
+  "ZRAM": "${{ github.event.inputs.ZRAM }}",
+  "KPM": "${{ github.event.inputs.KPM }}",
+  "SUFFIX": "${{ github.event.inputs.SUFFIX }}",
+  "FAST_BUILD": "${{ github.event.inputs.FAST_BUILD }}",
+  "LSM_BBG": "${{ github.event.inputs.LSM_BBG }}",
+  "SCHED_HMBIRD": "${{ github.event.inputs.SCHED_HMBIRD }}",
+  "DROID_SPACES": "${{ github.event.inputs.DROID_SPACES }}",
+  "RE_KERNEL": "${{ github.event.inputs.RE_KERNEL }}",
+  "UNICODE_BYPASS": "${{ github.event.inputs.UNICODE_BYPASS }}",
+  "SUSFS_META": "${{ github.event.inputs.SUSFS_META }}",
+  "MANAGER_SOURCE": "${{ github.event.inputs.MANAGER_SOURCE }}",
+  "MODEL": "${{ steps.extract_info.outputs.value }}",
+  "LZ4_UPDATE": "${{ github.event.inputs.LZ4_UPDATE }}",
+  "NETFILTER": "${{ github.event.inputs.NETFILTER }}",
+  "CCM": "${{ github.event.inputs.CCM }}",
+  "SUSFS_DEV": "${{ github.event.inputs.SUSFS_DEV }}",
+  "SUSFS_CI": "${{ github.event.inputs.SUSFS_CI }}",
+  "SUBLEVEL": "${{ github.event.inputs.SUBLEVEL }}",
+  "BUILD_TIME": "${{ github.event.inputs.BUILD_TIME }}",
+  "BUILD_NOCCACHE": "${{ github.event.inputs.BUILD_NOCCACHE }}",
+  "SPACE_NOCLEAN": "${{ github.event.inputs.SPACE_NOCLEAN }}"
+}
+JSONEOF
+          echo "✅ Generated metadata.json"
+
+      - name: Upload Build Metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-metadata
+          path: ./metadata.json
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
         with:

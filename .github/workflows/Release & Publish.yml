@@ -1,0 +1,323 @@
+name: Release & Publish
+
+on:
+  workflow_run:
+    workflows: ["Build All OnePlus Kernels"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./artifacts
+
+      - name: Load Metadata or Auto-Detect (Backup)
+        id: load_meta
+        run: |
+          METADATA_FILE="./artifacts/build-metadata/metadata.json"
+
+          if [ -f "$METADATA_FILE" ]; then
+            echo "✅ 读取 metadata.json"
+            jq -r 'to_entries[] | "\(.key)=\(.value)"' "$METADATA_FILE" >> "$GITHUB_ENV"
+          else
+            echo "⚠️ metadata.json 未找到，启用自动检测备份"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo " 📌 以下为自动衍生变量的获取方法文档备份"
+            echo "     这些逻辑来自 Build Kernel 工作流中你自加的代码"
+            echo "     如果因同步上游导致 metadata.json 生成丢失，参考此文档复原"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+
+            # ===== 1. KSUVER（来自 KernelSU git 计数） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L733-734
+            # BRANCH_NAME 从 KSU_META 输入解析（格式: branch/custom_tag/manual_hash）
+            # cd ./KernelSU
+            # KSU_VERSION=$(expr $(git rev-list --count "$BRANCH_NAME" 2>/dev/null || echo 13000) + 30700)
+            # echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+            # → 备份方案：从 artifact 名正则提取（见下方）
+
+            # ===== 2. BRANCH_NAME（来自 KSU_META 输入） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L715-716, L736
+            # IFS='/' read -r BRANCH_NAME KSU_CUSTOM_TAG MANUAL_HASH <<< "$KSU_META"
+            # → 备份方案：无法重算，标记为 unknown
+
+            # ===== 3. TKERNEL_VERSION（应用补丁后的内核版本） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L566-571
+            # 从 kernel_workspace/kernel_platform/common/Makefile 提取 VERSION+PATCHLEVEL+SUBLEVEL
+            # 与应用补丁前后的版本对比
+            # → 备份方案：从 artifact 名正则提取（见下方）
+
+            # ===== 4. KERNEL_VERSION（构建配置中的分支版本） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L546-548
+            # BRANCH=$(grep -oP '^BRANCH=\K.*' "build.config.gki.aarch64" 2>/dev/null)
+            # echo "KERNEL_VERSION=${BRANCH#*-}" >> $GITHUB_ENV
+            # → 备份方案：需要内核源码树，无法在此重算
+
+            # ===== 5. MANIFEST_REPO / MANIFEST_BRANCH（源码清单仓库） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L276-281
+            # for repo_revision in ...; do
+            #   FOUND_REPO=/home/manifest/<repo>_<branch>
+            #   if [ -f "${FOUND_REPO}/${FILE}.xml" ]; then
+            #     echo "MANIFEST_REPO=$FOUND_REPO" >> "$GITHUB_ENV"
+            #     echo "MANIFEST_BRANCH=$FOUND_BRANCH" >> "$GITHUB_ENV"
+            #   fi
+            # done
+            # → 备份方案：需要完整构建环境，无法在此重算
+
+            # ===== 6. SUSFS_COMMIT_HASH（SUSFS 补丁 commit） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L764-766
+            # cd kernel_workspace/SukiSU_patch/KernelSU/susfs
+            # SUSFS_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+            # echo "SUSFS_COMMIT_HASH=$SUSFS_COMMIT_HASH" >> $GITHUB_ENV
+            # → 备份方案：可从 artifact 名正则或临时 clone SUSFS 仓库重算
+
+            # ===== 7. ZRAM_ALGO_U（ZRAM 算法名大写） =====
+            # 源码位置: Build_Kernel_OnePlus.yml L1063-1066
+            # IFS='/' read -r ZRAM_SWSTA ZRAM_ALGO ZRAM_SIZE <<< "$ZRAM"
+            # echo "ZRAM_ALGO_U=${ZRAM_ALGO^^}" >> $GITHUB_ENV
+            # → 备份方案：输入 ZRAM 的格式为 "1/lz4/1"，可从中解析
+
+            echo ""
+
+            # ===== 实际自动检测逻辑 =====
+            # 从 AnyKernel3 artifact 名正则提取（涵盖 KSUVER / MODEL / TKERNEL_VERSION）
+            ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_ReSukiSU_*" | head -1)
+            if [ -n "$ANY_DIR" ]; then
+              ARTIFACT_NAME=$(basename "$ANY_DIR")
+              echo "🧩 检测到 artifact: ${ARTIFACT_NAME}"
+              # 正则: AnyKernel3_ReSukiSU_<KSUVER>_<MODEL>(<KERNVER>)<SUFFIX>
+              if [[ "$ARTIFACT_NAME" =~ ^AnyKernel3_ReSukiSU_([0-9]+)_(.+)\((.+)\)(.+)?$ ]]; then
+                echo "KSUVER=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
+                echo "MODEL=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
+                echo "TKERNEL_VERSION=${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
+                echo "✅ 自动检测: KSUVER=${BASH_REMATCH[1]}, MODEL=${BASH_REMATCH[2]}, KERNEL=${BASH_REMATCH[3]}"
+              else
+                echo "⚠️ artifact 名解析失败，使用 unknown 占位"
+                echo "KSUVER=unknown" >> "$GITHUB_ENV"
+                echo "MODEL=unknown" >> "$GITHUB_ENV"
+                echo "TKERNEL_VERSION=unknown" >> "$GITHUB_ENV"
+              fi
+            else
+              echo "⚠️ 未找到 AnyKernel3 artifact，使用 unknown 占位"
+              echo "KSUVER=unknown" >> "$GITHUB_ENV"
+              echo "MODEL=unknown" >> "$GITHUB_ENV"
+              echo "TKERNEL_VERSION=unknown" >> "$GITHUB_ENV"
+            fi
+
+            # 其余无法从 artifact 重算的字段用占位值
+            echo "MANIFEST_REPO=unknown" >> "$GITHUB_ENV"
+            echo "MANIFEST_BRANCH=unknown" >> "$GITHUB_ENV"
+            echo "SUSFS_COMMIT_HASH=unknown" >> "$GITHUB_ENV"
+            echo "BRANCH_NAME=unknown" >> "$GITHUB_ENV"
+            echo "KERNEL_VERSION=unknown" >> "$GITHUB_ENV"
+            echo "ZRAM_ALGO_U=" >> "$GITHUB_ENV"
+            echo "SUFFIX_VALUE=" >> "$GITHUB_ENV"
+            echo "FILE=auto-detect" >> "$GITHUB_ENV"
+            echo "ZRAM=auto-detect" >> "$GITHUB_ENV"
+            echo "FAST_BUILD=auto-detect" >> "$GITHUB_ENV"
+            echo "SUSFS_CI=auto-detect" >> "$GITHUB_ENV"
+            echo "KPM=auto-detect" >> "$GITHUB_ENV"
+            echo "LSM_BBG=auto-detect" >> "$GITHUB_ENV"
+            echo "SCHED_HMBIRD=auto-detect" >> "$GITHUB_ENV"
+            echo "DROID_SPACES=auto-detect" >> "$GITHUB_ENV"
+            echo "RE_KERNEL=auto-detect" >> "$GITHUB_ENV"
+            echo "NETFILTER=auto-detect" >> "$GITHUB_ENV"
+            echo "CCM=auto-detect" >> "$GITHUB_ENV"
+            echo "UNICODE_BYPASS=auto-detect" >> "$GITHUB_ENV"
+            echo "LZ4_UPDATE=auto-detect" >> "$GITHUB_ENV"
+            echo "SUSFS_DEV=auto-detect" >> "$GITHUB_ENV"
+            echo "SPACE_NOCLEAN=auto-detect" >> "$GITHUB_ENV"
+            echo "BUILD_NOCCACHE=auto-detect" >> "$GITHUB_ENV"
+          fi
+
+          echo "📋 === 加载的构建元数据 ==="
+          env | grep -E '^(KSUVER|TKERNEL|KERNEL_VERSION|MODEL|MANIFEST|SUSFS|BRANCH_|ZRAM_ALGO|SUFFIX_|FILE|ZRAM=|FAST_|SUSFS_CI|KPM=|LSM_|SCHED|DROID|RE_KERNEL|NETFILTER|CCM|UNICODE|LZ4_|SUSFS_DEV|SPACE_|BUILD_NO)'
+
+      - name: Prepare Release Assets
+        id: prepare_release
+        run: |
+          mkdir -p release-assets
+
+          # 复制 AnyKernel3
+          ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_ReSukiSU_*" | head -1)
+          if [ -d "$ANY_DIR" ]; then
+            echo "✅ 找到 AnyKernel3: $(basename "$ANY_DIR")"
+            cp -r "$ANY_DIR"/* ./release-assets/ || true
+          else
+            echo "⚠️ AnyKernel3 artifact 未找到，跳过"
+          fi
+
+          # 复制 ZRAM 模块（如有）
+          ZRAM_DIR=$(find ./artifacts -maxdepth 1 -type d -name "ZRAM-Module_*" | head -1)
+          if [ -d "$ZRAM_DIR" ]; then
+            echo "✅ 找到 ZRAM Module: $(basename "$ZRAM_DIR")"
+            mkdir -p ./release-assets/ZRAM-Module
+            cp -r "$ZRAM_DIR"/* ./release-assets/ZRAM-Module/ || true
+          fi
+
+          # 组装 Release 文件名
+          KSU_VER="${KSUVER}"
+          MODEL="${MODEL}"
+          RELEASE_NAME="ReSukiSU_${KSU_VER}"
+          cd release-assets || exit 0
+          zip -r "../${RELEASE_NAME}.zip" ./* || true
+          cd ..
+          BUILD_DATE_BEIJING=$(TZ='Asia/Shanghai' date +"%a %b %d %T %Z %Y")
+
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_MODEL=${MODEL}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_BUILD_DATE=${BUILD_DATE_BEIJING}" >> "$GITHUB_OUTPUT"
+          echo "✅ Release 打包完成: ${RELEASE_NAME}.zip (model=${MODEL})"
+
+      - name: Remove existing release with same tag (if any)
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            core.info(`Checking release for tag: ${tag}`);
+            try {
+              const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              const release_id = rel.data.id;
+              core.info(`Found release id ${release_id}, deleting...`);
+              await github.rest.repos.deleteRelease({ owner, repo, release_id });
+            } catch (err) {
+              if (err.status === 404) {
+                core.info('No existing release for that tag');
+              } else {
+                throw err;
+              }
+            }
+            try {
+              core.info(`Attempting to delete git ref tags/${tag}`);
+              await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag}` });
+            } catch (err) {
+              if (err.status === 422 || err.status === 404) {
+                core.info('Tag not found or cannot delete - skipping');
+              } else {
+                throw err;
+              }
+            }
+        env:
+          RELEASE_TAG: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          body: |
+            ReSukiSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+
+            ## Build Information
+            - KernelSU Version: ${{ env.KSUVER }}
+            - Model: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            - Kernel Version: ${{ env.TKERNEL_VERSION }}           
+            - Manifest Source: ${{ env.MANIFEST_REPO }}@${{ env.MANIFEST_BRANCH }}
+            - SUSFS Commit: ${{ env.SUSFS_COMMIT_HASH }}
+            - Build Date: ${{ steps.prepare_release.outputs.RELEASE_BUILD_DATE }}
+
+            ## Config Options Applied
+            - ZRAM Support: ${{ env.ZRAM }}
+            - FAST_BUILD: ${{ env.FAST_BUILD }}
+            - SUSFS Module Source Mode: ${{ env.SUSFS_CI }}
+
+            ## Included Assets
+            - Release zip: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
+
+            ## Installation
+            1. 下载上方 zip 文件（Assets）
+            2. 在 Recovery 中刷入（AnyKernel3 包含 Image）
+            3. 重启并根据需要安装 ReSukiSU APK（如包含）
+
+            ## Notes & Warnings
+            - 本内核仅适用于: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            - 刷写内核有风险，请务必备份 boot 等关键分区。
+          draft: false
+          prerelease: false
+          files: |
+            ./${{ steps.prepare_release.outputs.RELEASE_FILE }}
+
+      - name: Publish release file to Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RELEASE_FILE: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
+          RELEASE_NAME: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          RELEASE_MODEL: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+          RELEASE_BUILD_DATE: ${{ steps.prepare_release.outputs.RELEASE_BUILD_DATE }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping Telegram publish."
+            exit 0
+          fi
+
+          FILE_PATH="./${RELEASE_FILE}"
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "Release file not found: $FILE_PATH"
+            exit 0
+          fi
+
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_NAME}"
+
+          escape_mdv2() {
+            printf '%s' "$1" | perl -pe 's{([_*\[\]()~`>#+=|{}.!-])}{\\$1}g'
+          }
+
+          ESC_NAME=$(escape_mdv2 "${RELEASE_NAME}")
+          ESC_MODEL=$(escape_mdv2 "${RELEASE_MODEL}")
+          ESC_KSU=$(escape_mdv2 "${KSUVER}")
+          ESC_KERNEL=$(escape_mdv2 "${TKERNEL_VERSION}")
+          ESC_BUILDDATE=$(escape_mdv2 "${RELEASE_BUILD_DATE}")
+          ESC_SUSFS=$(escape_mdv2 "${SUSFS_COMMIT_HASH}")
+          ESC_URL=$(escape_mdv2 "${RELEASE_URL}")
+          ESC_BRANCH=$(escape_mdv2 "${BRANCH_NAME}")
+
+          CAPTION=$(cat <<EOF
+          *ReSukiSU — ${ESC_BRANCH} Branch*
+          *Release:* \`${ESC_NAME}\`
+          *Model:* \`${ESC_MODEL}\`
+          *KSU version:* \`${ESC_KSU}\`
+          *Kernel:* \`${ESC_KERNEL}\`
+          *SUSFS Commit:* \`${ESC_SUSFS}\`
+          *Build Date:* \`${ESC_BUILDDATE}\`
+          🔗 [Release page on GitHub](${ESC_URL})
+
+          ⚠️ 提示：
+          • 刷入前请务必备份 boot 等关键分区。
+          • 遇到问题请在群内回复本消息并附上日志。
+          EOF
+          )
+
+          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document=@"${FILE_PATH}" \
+            --form-string "caption=${CAPTION}" \
+            -F "parse_mode=MarkdownV2")
+
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            echo "Uploaded to Telegram successfully."
+          else
+            echo "Telegram upload may have failed. HTTP code: $http_code"
+            sed -n '1,200p' /tmp/telegram_resp.txt || true
+          fi

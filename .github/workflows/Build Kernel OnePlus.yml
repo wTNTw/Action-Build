@@ -1625,40 +1625,38 @@ jobs:
 
       - name: Generate Build Metadata
         run: |
-          cat > metadata.json << 'JSONEOF'
-{
-  "KSUVER": "${{ env.KSUVER }}",
-  "TKERNEL_VERSION": "${{ env.TKERNEL_VERSION }}",
-  "KERNEL_VERSION": "${{ env.KERNEL_VERSION }}",
-  "MANIFEST_REPO": "${{ env.MANIFEST_REPO }}",
-  "MANIFEST_BRANCH": "${{ env.MANIFEST_BRANCH }}",
-  "SUSFS_COMMIT_HASH": "${{ env.SUSFS_COMMIT_HASH }}",
-  "BRANCH_NAME": "${{ github.event.inputs.KSU_META }}",
-  "ZRAM_ALGO_U": "${{ env.ZRAM_ALGO_U }}",
-  "FILE": "${{ github.event.inputs.FILE }}",
-  "ZRAM": "${{ github.event.inputs.ZRAM }}",
-  "KPM": "${{ github.event.inputs.KPM }}",
-  "SUFFIX": "${{ github.event.inputs.SUFFIX }}",
-  "FAST_BUILD": "${{ github.event.inputs.FAST_BUILD }}",
-  "LSM_BBG": "${{ github.event.inputs.LSM_BBG }}",
-  "SCHED_HMBIRD": "${{ github.event.inputs.SCHED_HMBIRD }}",
-  "DROID_SPACES": "${{ github.event.inputs.DROID_SPACES }}",
-  "RE_KERNEL": "${{ github.event.inputs.RE_KERNEL }}",
-  "UNICODE_BYPASS": "${{ github.event.inputs.UNICODE_BYPASS }}",
-  "SUSFS_META": "${{ github.event.inputs.SUSFS_META }}",
-  "MANAGER_SOURCE": "${{ github.event.inputs.MANAGER_SOURCE }}",
-  "MODEL": "${{ steps.extract_info.outputs.value }}",
-  "LZ4_UPDATE": "${{ github.event.inputs.LZ4_UPDATE }}",
-  "NETFILTER": "${{ github.event.inputs.NETFILTER }}",
-  "CCM": "${{ github.event.inputs.CCM }}",
-  "SUSFS_DEV": "${{ github.event.inputs.SUSFS_DEV }}",
-  "SUSFS_CI": "${{ github.event.inputs.SUSFS_CI }}",
-  "SUBLEVEL": "${{ github.event.inputs.SUBLEVEL }}",
-  "BUILD_TIME": "${{ github.event.inputs.BUILD_TIME }}",
-  "BUILD_NOCCACHE": "${{ github.event.inputs.BUILD_NOCCACHE }}",
-  "SPACE_NOCLEAN": "${{ github.event.inputs.SPACE_NOCLEAN }}"
-}
-JSONEOF
+          printf '{\n' > metadata.json
+          printf '  "KSUVER": "%s",\n' "${{ env.KSUVER }}" >> metadata.json
+          printf '  "TKERNEL_VERSION": "%s",\n' "${{ env.TKERNEL_VERSION }}" >> metadata.json
+          printf '  "KERNEL_VERSION": "%s",\n' "${{ env.KERNEL_VERSION }}" >> metadata.json
+          printf '  "MANIFEST_REPO": "%s",\n' "${{ env.MANIFEST_REPO }}" >> metadata.json
+          printf '  "MANIFEST_BRANCH": "%s",\n' "${{ env.MANIFEST_BRANCH }}" >> metadata.json
+          printf '  "SUSFS_COMMIT_HASH": "%s",\n' "${{ env.SUSFS_COMMIT_HASH }}" >> metadata.json
+          printf '  "ZRAM_ALGO_U": "%s",\n' "${{ env.ZRAM_ALGO_U }}" >> metadata.json
+          printf '  "BRANCH_NAME": "%s",\n' "${{ github.event.inputs.KSU_META }}" >> metadata.json
+          printf '  "FILE": "%s",\n' "${{ github.event.inputs.FILE }}" >> metadata.json
+          printf '  "ZRAM": "%s",\n' "${{ github.event.inputs.ZRAM }}" >> metadata.json
+          printf '  "KPM": "%s",\n' "${{ github.event.inputs.KPM }}" >> metadata.json
+          printf '  "SUFFIX": "%s",\n' "${{ github.event.inputs.SUFFIX }}" >> metadata.json
+          printf '  "FAST_BUILD": "%s",\n' "${{ github.event.inputs.FAST_BUILD }}" >> metadata.json
+          printf '  "LSM_BBG": "%s",\n' "${{ github.event.inputs.LSM_BBG }}" >> metadata.json
+          printf '  "SCHED_HMBIRD": "%s",\n' "${{ github.event.inputs.SCHED_HMBIRD }}" >> metadata.json
+          printf '  "DROID_SPACES": "%s",\n' "${{ github.event.inputs.DROID_SPACES }}" >> metadata.json
+          printf '  "RE_KERNEL": "%s",\n' "${{ github.event.inputs.RE_KERNEL }}" >> metadata.json
+          printf '  "UNICODE_BYPASS": "%s",\n' "${{ github.event.inputs.UNICODE_BYPASS }}" >> metadata.json
+          printf '  "SUSFS_META": "%s",\n' "${{ github.event.inputs.SUSFS_META }}" >> metadata.json
+          printf '  "MANAGER_SOURCE": "%s",\n' "${{ github.event.inputs.MANAGER_SOURCE }}" >> metadata.json
+          printf '  "MODEL": "%s",\n' "${{ steps.extract_info.outputs.value }}" >> metadata.json
+          printf '  "LZ4_UPDATE": "%s",\n' "${{ github.event.inputs.LZ4_UPDATE }}" >> metadata.json
+          printf '  "NETFILTER": "%s",\n' "${{ github.event.inputs.NETFILTER }}" >> metadata.json
+          printf '  "CCM": "%s",\n' "${{ github.event.inputs.CCM }}" >> metadata.json
+          printf '  "SUSFS_DEV": "%s",\n' "${{ github.event.inputs.SUSFS_DEV }}" >> metadata.json
+          printf '  "SUSFS_CI": "%s",\n' "${{ github.event.inputs.SUSFS_CI }}" >> metadata.json
+          printf '  "SUBLEVEL": "%s",\n' "${{ github.event.inputs.SUBLEVEL }}" >> metadata.json
+          printf '  "BUILD_TIME": "%s",\n' "${{ github.event.inputs.BUILD_TIME }}" >> metadata.json
+          printf '  "BUILD_NOCCACHE": "%s",\n' "${{ github.event.inputs.BUILD_NOCCACHE }}" >> metadata.json
+          printf '  "SPACE_NOCLEAN": "%s"\n' "${{ github.event.inputs.SPACE_NOCLEAN }}" >> metadata.json
+          printf '}\n' >> metadata.json
           echo "✅ Generated metadata.json"
 
       - name: Upload Build Metadata

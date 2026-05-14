@@ -1,10 +1,11 @@
 name: Release & Publish
 
 on:
-  workflow_run:
-    workflows: ["Build All OnePlus Kernels"]
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      TRIGGER_RUN_ID:
+        description: "Build workflow run ID (from the triggering build)"
+        required: true
 
 permissions:
   contents: write
@@ -12,12 +13,11 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.inputs.TRIGGER_RUN_ID }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./artifacts
 

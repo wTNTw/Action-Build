@@ -1730,5 +1730,15 @@ jobs:
           name: ZRAM-Module_${{ env.KERNEL_VERSION }}_${{ steps.extract_info.outputs.value }}
           path: ZRAM-Module/*
 
+      - name: Trigger Release & Publish
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run "Release & Publish.yml" \
+            --ref ReSukiSU \
+            -f "TRIGGER_RUN_ID=${{ github.run_id }}"
+          echo "✅ 已触发 Release & Publish workflow (run: ${{ github.run_id }})"
+
       - name: Post-build Disk Check
         run: df -h

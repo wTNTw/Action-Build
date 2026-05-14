@@ -1009,11 +1009,16 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Rewrite lib/lz4/Makefile"
-          cat > lib/lz4/Makefile <<'EOF'
+          # 只添加 lz4armv8 目录中实际存在的源文件对应的 .o
+          LZ4_ARMV8_OBJS=""
+          for src in lib/lz4/lz4armv8/*.c lib/lz4/lz4armv8/*.S; do
+            [ -f "$src" ] && LZ4_ARMV8_OBJS="${LZ4_ARMV8_OBJS} lz4armv8/$(basename "${src%.*}.o")"
+          done
+          cat > lib/lz4/Makefile <<EOF
           ccflags-y += -O3 -std=gnu99 -DLZ4_FREESTANDING=1 -DLZ4_FAST_DEC_LOOP=1 -DLZ4_memcpy=memcpy -DLZ4_memset=memset -DLZ4_memmove=memmove
 
           obj-y += lz4.o lz4hc.o
-          obj-$(CONFIG_ARM64) += $(addprefix lz4armv8/, lz4accel.o lz4armv8.o)
+          obj-\$(CONFIG_ARM64) +=${LZ4_ARMV8_OBJS}
           EOF
           if [ -f lib/lz4/lz4armv8/lz4accel.h ]; then
             echo "ccflags-y += -DCONFIG_LZ4_ARMV8_ACCEL" >> lib/lz4/Makefile

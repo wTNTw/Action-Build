@@ -1735,7 +1735,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cd "${GITHUB_WORKSPACE}"
           gh workflow run "Release & Publish.yml" \
+            --repo "${{ github.repository }}" \
             --ref ReSukiSU \
             -f "TRIGGER_RUN_ID=${{ github.run_id }}"
           echo "✅ 已触发 Release & Publish workflow (run: ${{ github.run_id }})"

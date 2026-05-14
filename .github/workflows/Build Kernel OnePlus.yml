@@ -1735,17 +1735,174 @@ jobs:
           name: ZRAM-Module_${{ env.KERNEL_VERSION }}_${{ steps.extract_info.outputs.value }}
           path: ZRAM-Module/*
 
-      - name: Trigger Release & Publish
+      - name: Prepare Release Assets
+        if: success()
+        id: prepare_release
+        run: |
+          KSU_VER="${{ env.KSUVER }}"
+          MODEL="${{ steps.extract_info.outputs.value }}"
+          RELEASE_NAME="ReSukiSU_${KSU_VER}"
+
+          mkdir -p release-assets
+          cp -r ./AnyKernel3/* ./release-assets/ || true
+
+          if [ -d "./ZRAM-Module" ]; then
+            mkdir -p ./release-assets/ZRAM-Module
+            cp -r ./ZRAM-Module/* ./release-assets/ZRAM-Module/ || true
+          fi
+
+          cd release-assets || exit 0
+          zip -r "../${RELEASE_NAME}.zip" ./* || true
+          cd ..
+
+          BUILD_DATE_BEIJING=$(TZ='Asia/Shanghai' date +"%a %b %d %T %Z %Y")
+
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_FILE=${RELEASE_NAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_MODEL=${MODEL}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_BUILD_DATE=${BUILD_DATE_BEIJING}" >> "$GITHUB_OUTPUT"
+          echo "✅ Release 打包完成: ${RELEASE_NAME}.zip (model=${MODEL})"
+
+      - name: Remove existing release with same tag (if any)
+        if: success()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            core.info(`Checking release for tag: ${tag}`);
+            try {
+              const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              const release_id = rel.data.id;
+              core.info(`Found release id ${release_id}, deleting...`);
+              await github.rest.repos.deleteRelease({ owner, repo, release_id });
+            } catch (err) {
+              if (err.status === 404) {
+                core.info('No existing release for that tag');
+              } else {
+                throw err;
+              }
+            }
+            try {
+              core.info(`Attempting to delete git ref tags/${tag}`);
+              await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag}` });
+            } catch (err) {
+              if (err.status === 422 || err.status === 404) {
+                core.info('Tag not found or cannot delete - skipping');
+              } else {
+                throw err;
+              }
+            }
+        env:
+          RELEASE_TAG: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          body: |
+            ReSukiSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+
+            ## Build Information
+            - KernelSU Version: ${{ env.KSUVER }}
+            - Model: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            - Kernel Version: ${{ env.TKERNEL_VERSION }}           
+            - Manifest Source: ${{ env.MANIFEST_REPO }}@${{ env.MANIFEST_BRANCH }}
+            - SUSFS Commit: ${{ env.SUSFS_COMMIT_HASH }}
+            - Build Date: ${{ steps.prepare_release.outputs.RELEASE_BUILD_DATE }}
+
+            ## Config Options Applied
+            - ZRAM Support: ${{ github.event.inputs.ZRAM }}
+            - FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}
+            - SUSFS Module Source Mode: ${{ github.event.inputs.SUSFS_CI }}
+
+            ## Included Assets
+            - Release zip: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
+
+            ## Installation
+            1. 下载上方 zip 文件（Assets）
+            2. 在 Recovery 中刷入（AnyKernel3 包含 Image）
+            3. 重启并根据需要安装 ReSukiSU APK（如包含）
+
+            ## Notes & Warnings
+            - 本内核仅适用于: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            - 刷写内核有风险，请务必备份 boot 等关键分区。
+          draft: false
+          prerelease: false
+          files: |
+            ./${{ steps.prepare_release.outputs.RELEASE_FILE }}
+
+      - name: Publish release file to Telegram
         if: success()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RELEASE_FILE: ${{ steps.prepare_release.outputs.RELEASE_FILE }}
+          RELEASE_NAME: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          RELEASE_MODEL: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+          RELEASE_BUILD_DATE: ${{ steps.prepare_release.outputs.RELEASE_BUILD_DATE }}
         run: |
-          cd "${GITHUB_WORKSPACE}"
-          gh workflow run "Release & Publish.yml" \
-            --repo "${{ github.repository }}" \
-            --ref ReSukiSU \
-            -f "TRIGGER_RUN_ID=${{ github.run_id }}"
-          echo "✅ 已触发 Release & Publish workflow (run: ${{ github.run_id }})"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping Telegram publish."
+            exit 0
+          fi
+
+          FILE_PATH="./${RELEASE_FILE}"
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "Release file not found: $FILE_PATH"
+            exit 0
+          fi
+
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_NAME}"
+
+          escape_mdv2() {
+            printf '%s' "$1" | perl -pe 's{([_*\[\]()~`>#+=|{}.!-])}{\\$1}g'
+          }
+
+          ESC_NAME=$(escape_mdv2 "${RELEASE_NAME}")
+          ESC_MODEL=$(escape_mdv2 "${RELEASE_MODEL}")
+          ESC_KSU=$(escape_mdv2 "${KSUVER}")
+          ESC_KERNEL=$(escape_mdv2 "${TKERNEL_VERSION}")
+          ESC_BUILDDATE=$(escape_mdv2 "${RELEASE_BUILD_DATE}")
+          ESC_SUSFS=$(escape_mdv2 "${SUSFS_COMMIT_HASH}")
+          ESC_URL=$(escape_mdv2 "${RELEASE_URL}")
+          ESC_BRANCH=$(escape_mdv2 "${BRANCH_NAME}")
+
+          CAPTION=$(cat <<EOF
+          *ReSukiSU — ${ESC_BRANCH} Branch*
+          *Release:* \`${ESC_NAME}\`
+          *Model:* \`${ESC_MODEL}\`
+          *KSU version:* \`${ESC_KSU}\`
+          *Kernel:* \`${ESC_KERNEL}\`
+          *SUSFS Commit:* \`${ESC_SUSFS}\`
+          *Build Date:* \`${ESC_BUILDDATE}\`
+          🔗 [Release page on GitHub](${ESC_URL})
+
+          ⚠️ 提示：
+          • 刷入前请务必备份 boot 等关键分区。
+          • 遇到问题请在群内回复本消息并附上日志。
+          EOF
+          )
+
+          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document=@"${FILE_PATH}" \
+            --form-string "caption=${CAPTION}" \
+            -F "parse_mode=MarkdownV2")
+
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            echo "Uploaded to Telegram successfully."
+          else
+            echo "Telegram upload may have failed. HTTP code: $http_code"
+            sed -n '1,200p' /tmp/telegram_resp.txt || true
+          fi
 
       - name: Post-build Disk Check
         run: df -h

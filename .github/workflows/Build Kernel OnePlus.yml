@@ -109,7 +109,7 @@ on:
         default: "main//"
       LZ4_UPDATE:
         type: boolean
-        description: "(危险)是否升级LZ4到上游最新？"
+        description: "是否升级LZ4到上游最新？"
         required: true
         default: false
       ZRAM:
@@ -184,7 +184,7 @@ on:
 
 jobs:
   build:
-    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
+    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "none"
@@ -344,6 +344,7 @@ jobs:
           echo "Selected UNICODE_BYPASS: ${{ github.event.inputs.UNICODE_BYPASS }}"
           echo "Selected DROID_SPACES: ${{ github.event.inputs.DROID_SPACES }}"
           echo "Selected RE_KERNEL: ${{ github.event.inputs.RE_KERNEL }}"
+          echo "Selected LZ4_UPDATE: ${{ github.event.inputs.LZ4_UPDATE }}"
 
           BUILD_TIME="${{ github.event.inputs.BUILD_TIME }}"
           SUFFIX="${{ github.event.inputs.SUFFIX }}"
@@ -777,7 +778,7 @@ jobs:
             git clone https://github.com/Sakion-Team/Re-Kernel.git
           fi
           if [ "${{ github.event.inputs.LZ4_UPDATE }}" = "true" ]; then
-            git clone https://github.com/lz4/lz4.git
+            git clone https://github.com/Numbersf/lz4_oplus.git
           fi
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           cd kernel_platform
@@ -821,6 +822,10 @@ jobs:
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             # Fake Patch to fix failures
             fake_patched=0
+            fake_patched_dist=0
+            fake_patched_swap=0
+            fake_patched_ns=0
+            fake_patched_expand=0
             if [ "$KMI" = "android15-6.6" ]; then
               if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
                 echo "未找到 nr_subpages，正在进行补丁修复"
@@ -830,6 +835,21 @@ jobs:
               if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
                 echo "未找到 #include <linux/dma-buf.h>，添加缺失的头文件"
                 sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+              fi
+              if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+                echo "未找到 #include <linux/zswap.h>，添加缺失的头文件"
+                sed -i '/#include <linux\/sched\/sysctl\.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+                fake_patched_swap=1
+              fi
+              if ! grep -qxF '#include <trace/hooks/fs.h>' ./fs/namespace.c && ! grep -qxF 'susfs_def.h' ./fs/namespace.c; then
+                echo "未找到 #include <trace/hooks/fs.h>，添加缺失的头文件"
+                sed -i '/#include <trace\/hooks\/blk\.h>/a #include <trace\/hooks\/fs.h>' ./fs/namespace.c
+                fake_patched_ns=1
+              fi
+              if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c && ! grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c; then
+                echo "临时展开 last_vma_end if 块，修复匹配问题"
+                perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+                fake_patched_expand=1
               fi
             fi
             if [ "$KMI" = "android14-6.1" ]; then
@@ -848,6 +868,13 @@ jobs:
                 fake_patched=1
               fi
             fi
+            if [ "$KMI" = "android13-5.15" ]; then
+              if grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c && ! grep -qxF '#include <linux/susfs_def.h>' ./mm/memory.c; then
+                echo "发现干扰识别的 swap_slots.h，临时移除"
+                sed -i '/#include <linux\/swap_slots\.h>/d' ./mm/memory.c
+                fake_patched_dist=1
+              fi
+            fi
 
             echo "正在打susfs补丁"
             patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
@@ -863,6 +890,32 @@ jobs:
               if [ "$KMI" = "android12-5.10" ] || [ "$KMI" = "android13-5.15" ] || [ "$KMI" = "android14-6.1" ]; then
                 if grep -q 'goto[[:space:]]\+show_pad;' ./fs/proc/task_mmu.c; then
                   sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+              fi
+            fi
+            if [ "$fake_patched_dist" = 1 ]; then
+              if [ "$KMI" = "android13-5.15" ]; then
+                if ! grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+                  sed -i '/#ifdef CONFIG_KSU_SUSFS_SUS_MAP/i #include <linux/swap_slots.h>' ./mm/memory.c
+                fi
+              fi
+            fi
+            if [ "$fake_patched_swap" = 1 ]; then
+              if [ "$KMI" = "android15-6.6" ]; then
+                if grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+                  sed -i '/#include <linux\/zswap\.h>/d' ./mm/memory.c
+                fi
+              fi
+            fi
+            if [ "$fake_patched_ns" = 1 ]; then
+              if grep -qxF '#include <trace/hooks/fs.h>' ./fs/namespace.c && ! grep -qxF 'susfs_def.h' ./fs/namespace.c; then
+                sed -i '/#include <trace\/hooks\/fs\.h>/d' ./fs/namespace.c
+              fi
+            fi
+            if [ "$fake_patched_expand" = 1 ]; then
+              if [ "$KMI" = "android15-6.6" ]; then
+                if grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c; then
+                  perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\) \{\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t\}/\t\t\tif (vma->vm_end > last_vma_end)\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);/' ./fs/proc/task_mmu.c
                 fi
               fi
             fi
@@ -968,108 +1021,9 @@ jobs:
         if: ${{ github.event.inputs.LZ4_UPDATE == 'true' }}
         run: |
           set -euo pipefail
-          LZ4_DIR="${GITHUB_WORKSPACE}/kernel_workspace/lz4/lib"
+          LZ4_REPO="${GITHUB_WORKSPACE}/kernel_workspace/lz4_oplus"
           cd kernel_workspace/kernel_platform/common
-          echo "::group::Remove old f2fs bindings"
-          sed -i '/^ifeq ($(CONFIG_F2FS_FS_COMPRESSION_FIXED_OUTPUT),y)$/,/^endif$/d' fs/f2fs/Makefile
-          sed -i '/^#include "lz4armv8\/lz4accel.h"$/d' fs/f2fs/compress.c
-          echo "::endgroup::"
-
-          echo "::group::Delete old LZ4 files"
-          rm -f lib/lz4/lz4_compress.c lib/lz4/lz4_decompress.c lib/lz4/lz4hc_compress.c lib/lz4/lz4defs.h
-          echo "::endgroup::"
-
-          echo "::group::Rename/Copy LZ4 accelerator tree"
-          mkdir -p lib/lz4/lz4armv8
-          if [ -d fs/f2fs/lz4armv8 ]; then
-            mv fs/f2fs/lz4armv8/* lib/lz4/lz4armv8/ 2>/dev/null || true
-            rmdir fs/f2fs/lz4armv8 2>/dev/null || true
-          fi
-          cp -f "${LZ4_DIR}/lz4.c" lib/lz4/
-          cp -f "${LZ4_DIR}/lz4.h" lib/lz4/
-          cp -f "${LZ4_DIR}/lz4hc.c" lib/lz4/
-          cp -f "${LZ4_DIR}/lz4hc.h" lib/lz4/
-          echo "::endgroup::"
-
-          echo "::group::Patch lz4.h lz4hc.h lz4.c lz4hc.c for kernel"
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stddef\.h>//g' lib/lz4/lz4.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stdint\.h>//g' lib/lz4/lz4.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<string\.h>//g' lib/lz4/lz4.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stdlib\.h>//g' lib/lz4/lz4.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<limits\.h>//g' lib/lz4/lz4.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stddef\.h>//g' lib/lz4/lz4hc.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stdint\.h>//g' lib/lz4/lz4hc.h
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stdint\.h>//g' lib/lz4/lz4.c
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<limits\.h>//g' lib/lz4/lz4.c
-          sed -i '/#[[:space:]]*error.*assumes that sizeof(int)/d' lib/lz4/lz4.c
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<stdint\.h>//g' lib/lz4/lz4hc.c
-          sed -i 's/^#[[:space:]]*include[[:space:]]*<limits\.h>//g' lib/lz4/lz4hc.c
-          printf '#ifdef __KERNEL__\n#include <linux/types.h>\n#include <linux/string.h>\n#ifndef LZ4_FORCE_INLINE\n#define LZ4_FORCE_INLINE static inline\n#endif\n#ifndef LZ4_memcpy\n#define LZ4_memcpy(dst, src, sz) memcpy(dst, src, sz)\n#endif\n#ifndef LZ4_memset\n#define LZ4_memset(p, v, sz) memset(p, v, sz)\n#endif\n#ifndef LZ4_memmove\n#define LZ4_memmove(dst, src, sz) memmove(dst, src, sz)\n#endif\n#endif /* __KERNEL__ */\n' | cat - lib/lz4/lz4.h > /tmp/lz4.h.tmp && mv /tmp/lz4.h.tmp lib/lz4/lz4.h
-          printf '#ifdef __KERNEL__\n#endif /* __KERNEL__ */\n' | cat - lib/lz4/lz4hc.h > /tmp/lz4hc.h.tmp && mv /tmp/lz4hc.h.tmp lib/lz4/lz4hc.h
-          echo "::endgroup::"
-
-          echo "::group::Rewrite lib/lz4/Makefile"
-          # 只添加 lz4armv8 目录中实际存在的源文件对应的 .o
-          LZ4_ARMV8_OBJS=""
-          for src in lib/lz4/lz4armv8/*.c lib/lz4/lz4armv8/*.S; do
-            [ -f "$src" ] && LZ4_ARMV8_OBJS="${LZ4_ARMV8_OBJS} lz4armv8/$(basename "${src%.*}.o")"
-          done
-          cat > lib/lz4/Makefile <<EOF
-          ccflags-y += -O3 -std=gnu99 -DLZ4_FREESTANDING=1 -DLZ4_FAST_DEC_LOOP=1 -DLZ4_memcpy=memcpy -DLZ4_memset=memset -DLZ4_memmove=memmove
-
-          obj-y += lz4.o lz4hc.o
-          obj-\$(CONFIG_ARM64) +=${LZ4_ARMV8_OBJS}
-          EOF
-          if [ -f lib/lz4/lz4armv8/lz4accel.h ]; then
-            echo "ccflags-y += -DCONFIG_LZ4_ARMV8_ACCEL" >> lib/lz4/Makefile
-          fi
-          echo "::endgroup::"
-
-          echo "::group::Rewrite include/linux/lz4.h"
-          cat > include/linux/lz4.h <<'EOF'
-          /* SPDX-License-Identifier: BSD-2-Clause */
-          #ifndef __LINUX_LZ4_H__
-          #define __LINUX_LZ4_H__
-
-          #include "../../lib/lz4/lz4.h"
-          #include "../../lib/lz4/lz4hc.h"
-
-          #if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
-          #ifdef CONFIG_LZ4_ARMV8_ACCEL
-          #include "../../lib/lz4/lz4armv8/lz4accel.h"
-          #else
-          static inline int LZ4_arm64_decompress_safe(const char *src, char *dst, int slen, int dlen, bool dip)
-          {
-            return LZ4_decompress_safe(src, dst, slen, dlen);
-          }
-          #endif
-          #endif
-
-          #define LZ4_MEM_COMPRESS LZ4_STREAM_MINSIZE
-          #define LZ4HC_MEM_COMPRESS LZ4_STREAMHC_MINSIZE
-          #define LZ4HC_MIN_CLEVEL LZ4HC_CLEVEL_MIN
-          #define LZ4HC_DEFAULT_CLEVEL LZ4HC_CLEVEL_DEFAULT
-          #define LZ4HC_MAX_CLEVEL LZ4HC_CLEVEL_MAX
-
-          /* OEM compat: one-plus passes a private state pointer that upstream ignores */
-          #define LZ4_compress_default(src, dst, srcSize, dstCapacity, state) \
-                  LZ4_compress_default(src, dst, srcSize, dstCapacity)
-          #define LZ4_compress_destSize(src, dst, srcSizePtr, targetDstSize, state) \
-                  LZ4_compress_destSize(src, dst, srcSizePtr, targetDstSize)
-          #define LZ4_compress_HC(src, dst, srcSize, dstCapacity, level, state) \
-                  LZ4_compress_HC(src, dst, srcSize, dstCapacity, level)
-
-          #endif /* __LINUX_LZ4_H__ */
-          EOF
-          echo "::endgroup::"
-
-          echo "::group::Patch arm64 NEON decompress callsites"
-          sed -i '/int out_len = LZ4_decompress_safe(src, dst, slen, \*dlen);/c\int out_len;\n#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)\nout_len = LZ4_arm64_decompress_safe(src, dst, slen, *dlen, false);\n#else\nout_len = LZ4_decompress_safe(src, dst, slen, *dlen);\n#endif' crypto/lz4.c
-
-          sed -i '/int out_len = LZ4_decompress_safe(src, dst, slen, \*dlen);/c\int out_len;\n#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)\nout_len = LZ4_arm64_decompress_safe(src, dst, slen, *dlen, false);\n#else\nout_len = LZ4_decompress_safe(src, dst, slen, *dlen);\n#endif' crypto/lz4hc.c
-
-          sed -i '/result = LZ4_decompress_safe(src.data, dst.data, src.len, dst.len);/c\#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)\nresult = LZ4_arm64_decompress_safe(src.data, dst.data, src.len, dst.len, false);\n#else\nresult = LZ4_decompress_safe(src.data, dst.data, src.len, dst.len);\n#endif' fs/incfs/data_mgmt.c
-          echo "::endgroup::"
+          . "${LZ4_REPO}/apply_lz4_oplus.sh"
 
       - name: Apply ZRAM
         if: startsWith(github.event.inputs.ZRAM, '1/')
@@ -1626,7 +1580,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Generate Build Metadata
         run: |

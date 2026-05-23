@@ -18,6 +18,7 @@ on:
           - oneplus_11r_b
           - oneplus_ace2_b
           - oneplus_pad_lite_b
+          - oneplus_pad_lite_Canary_b
           - oneplus_pad_mt6983_b
           - oneplus_ace_2v_b
           - oneplus_ace_pro_v
@@ -54,13 +55,17 @@ on:
           - oneplus_ace_6
           - oneplus_turbo_6
           - oneplus_ace_6t
-          - oneplus_ace_6t_aosp
+          - oneplus_ace_6t_Canary
           - oneplus_15r
-          - oneplus_15r_aosp
+          - oneplus_15r_Canary
           - oneplus_15
-          - oneplus_15_aosp
+          - oneplus_15_Canary
           - oneplus_15t
-          - oneplus_15t_aosp
+          - oneplus_15t_Canary
+          - oneplus_pad_3_pro
+          - oneplus_pad_3_pro_Canary
+          - oneplus_pad_4
+          - oneplus_pad_4_Canary
       MANAGER_SOURCE:
         type: choice
         description: "管理器调用方向"
@@ -176,9 +181,9 @@ on:
         description: "是否停用空间清扫？"
         required: true
         default: false
-      BUILD_NOCCACHE:
+      BUILD_NOCACHE:
         type: boolean
-        description: "是否停用此次Ccache？"
+        description: "是否停用此次缓存？"
         required: true
         default: false
 
@@ -420,7 +425,7 @@ jobs:
           free -h
 
       - name: Set Cache Environment
-        if: ${{ github.event.inputs.BUILD_NOCCACHE == 'false' }}
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' }}
         run: |
           echo "CCACHE_DIR=$HOME/.ccache_${{ github.event.inputs.FILE }}" >> $GITHUB_ENV
           mkdir -p "$HOME/.ccache_${{ github.event.inputs.FILE }}"
@@ -487,21 +492,23 @@ jobs:
          sudo cp -f "$LIB_DIR/ccache" /usr/bin/ccache && sudo chmod +x /usr/bin/ccache
 
       - name: Restore Ccache
-        if: ${{ github.event.inputs.BUILD_NOCCACHE == 'false' }}
-        uses: actions/cache@v5
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' }}
+        id: restore-ccache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ github.event.inputs.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-16.8
 
       - name: Restore ThinLTO Cache
-        if: ${{ github.event.inputs.BUILD_NOCCACHE == 'false' && github.event.inputs.FAST_BUILD == 'true' }}
-        uses: actions/cache@v5
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' && github.event.inputs.FAST_BUILD == 'true' }}
+        id: restore-thinlto
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/kernel_workspace/.thinlto-cache
           key: thinlto-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-16.8
 
       - name: Initialize Ccache
-        if: ${{ github.event.inputs.BUILD_NOCCACHE == 'false' }}
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' }}
         run: |
           INIT_FLAG="${{ env.CCACHE_DIR }}/.ccache_initialized"
           if command -v ccache >/dev/null 2>&1; then
@@ -604,7 +611,6 @@ jobs:
           echo "KV1=${KMI#*-}"       | cut -d. -f1 >> $GITHUB_ENV
           echo "KV2=${KMI#*-}"       | tr -d '.' >> $GITHUB_ENV
           echo "KV3=${NEW_VERSION}"     | tr -d '.' >> $GITHUB_ENV
-          echo "KERNEL_SHORT_VERSION=$(echo $NEW_VERSION | cut -d. -f1,2)" >> $GITHUB_ENV
           echo "KERNEL_SHORT_PATCH_VERSION=$(echo $NEW_VERSION | cut -d. -f1,2 | tr '.' '_')" >> $GITHUB_ENV
 
       - name: Rust Version Handling
@@ -761,7 +767,7 @@ jobs:
           cd kernel_workspace
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             SUSFS_META="${{ github.event.inputs.SUSFS_META }}"
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}${{ github.inputs.SUSFS_DEV == 'true' && '-dev' || '' }}
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}${{ github.event.inputs.SUSFS_DEV == 'true' && '-dev' || '' }}
             cd susfs4ksu
             if [ -n "$SUSFS_META" ]; then
               if [[ "$SUSFS_META" =~ ^[0-9]+$ ]]; then
@@ -1009,7 +1015,7 @@ jobs:
             rm -f drivers/misc/ntsync.c
           fi
           patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch" || true
-          if [[ "$FILE" == oneplus_10r* || "$FILE" == "oneplus_ace_race_v" ]]; then
+          if [[ "$FILE" == oneplus_10r* ]]; then
             patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch" || true
           else
             patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_$([ -f "${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch" ] && echo "${KMI}_${ANDROID_SHORT_VERSION}" || echo "${KMI}").patch" || true
@@ -1041,6 +1047,9 @@ jobs:
 
           PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}"
           cd kernel_workspace/kernel_platform/common
+          if [[ "$KERNEL_VERSION" == "5.10" && "${CPU}" == mt* ]]; then
+            sed -i 's/select CRYPTO_LZO/depends on CRYPTO_LZO/' ./mm/oplus_mm/hybridswap_zram/Kconfig
+          fi
           echo "正在打lz4kd补丁"
           patch -p1 -F 3 < "${PATCH_DIR}/lz4kd.patch" || true
           echo 'lz4kd_patch完成'
@@ -1094,127 +1103,130 @@ jobs:
           KERNEL_VERSION="${{ env.KERNEL_VERSION }}"
           MANAGER_BRANCH="${{ steps.manager.outputs.manager_branch }}"
 
+          set_config() {
+            local key="${1%%=*}"
+            sed -i "/^${key}=/d" "$CONFIG_FILE"
+            echo "$1" >> "$CONFIG_FILE"
+          }
+
           # ReSukiSU配置
-          echo "CONFIG_KSU=y" >> "$CONFIG_FILE"
-          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> "$CONFIG_FILE"
-          echo "CONFIG_KSU_TOOLKIT_SUPPORT=y" >> "$CONFIG_FILE"
+          set_config "CONFIG_KSU=y"
+          set_config "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y"
+          set_config "CONFIG_KSU_TOOLKIT_SUPPORT=y"
           if [[ -n "$KSU_CUSTOM_TAG" ]]; then
-            echo "CONFIG_KSU_FULL_NAME_FORMAT=\"%TAG_NAME%-${KSU_CUSTOM_TAG}@${MANAGER_BRANCH}[%COMMIT_SHA%]\"" >> "$CONFIG_FILE"
+            set_config "CONFIG_KSU_FULL_NAME_FORMAT=\"%TAG_NAME%-${KSU_CUSTOM_TAG}@${MANAGER_BRANCH}[%COMMIT_SHA%]\""
           fi
 
           # KPM配置
           if [ "${{ github.event.inputs.KPM }}" = "KPM" ] || [ "${{ github.event.inputs.KPM }}" = "N/A" ]; then
-            echo "CONFIG_KPM=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_KPM=y"
           fi
           if [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
-            echo "CONFIG_KPM=n" >> "$CONFIG_FILE"
+            set_config "CONFIG_KPM=n"
           fi
 
           # SUSFS配置
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
-            echo "CONFIG_KSU_SUSFS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$CONFIG_FILE"
-            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_KSU_SUSFS=y"
+            set_config "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            set_config "CONFIG_KSU_SUSFS_SUS_MAP=y"
+            set_config "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            set_config "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+            set_config "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            set_config "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
+            set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+            set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+            set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
           else
-            echo "CONFIG_KSU_SUSFS=n" >> "$CONFIG_FILE"
+            set_config "CONFIG_KSU_SUSFS=n"
           fi
 
           # TMPFS配置*
-          echo "CONFIG_TMPFS_XATTR=y" >> "$CONFIG_FILE"
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$CONFIG_FILE"
+          set_config "CONFIG_TMPFS_XATTR=y"
+          set_config "CONFIG_TMPFS_POSIX_ACL=y"
 
           # BBR & ECN配置*
           if [ "${{ github.event.inputs.CCM }}" = "true" ]; then
-            echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$CONFIG_FILE"
-            echo "CONFIG_TCP_CONG_BBR=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NET_SCH_FQ=y" >> "$CONFIG_FILE"
-            echo "CONFIG_TCP_CONG_BIC=n" >> "$CONFIG_FILE"
-            echo "CONFIG_TCP_CONG_WESTWOOD=n" >> "$CONFIG_FILE"
-            echo "CONFIG_TCP_CONG_HTCP=n" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_ECN=y" >> "$CONFIG_FILE"
-            echo "CONFIG_TCP_ECN=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IPV6_ECN=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_NF_TARGET_ECN=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_TCP_CONG_ADVANCED=y"
+            set_config "CONFIG_TCP_CONG_BBR=y"
+            set_config "CONFIG_NET_SCH_FQ=y"
+            set_config "CONFIG_TCP_CONG_BIC=n"
+            set_config "CONFIG_TCP_CONG_WESTWOOD=n"
+            set_config "CONFIG_TCP_CONG_HTCP=n"
+            set_config "CONFIG_IP_ECN=y"
+            set_config "CONFIG_TCP_ECN=y"
+            set_config "CONFIG_IPV6_ECN=y"
+            set_config "CONFIG_IP_NF_TARGET_ECN=y"
           fi
 
           # Re-Kernel配置*
           if [ "${{ github.event.inputs.RE_KERNEL }}" = "true" ]; then
-            echo "CONFIG_REKERNEL=y" >> "$CONFIG_FILE"
-            echo "CONFIG_REKERNEL_NETWORK=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_REKERNEL=y"
+            set_config "CONFIG_REKERNEL_NETWORK=y"
           fi
 
           # ZRAM配置*
           if [[ "${{ github.event.inputs.ZRAM }}" == 1* ]]; then
-            echo "CONFIG_CRYPTO_LZ4HC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_CRYPTO_LZ4K=y" >> "$CONFIG_FILE"
-            echo "CONFIG_CRYPTO_LZ4KD=y" >> "$CONFIG_FILE"
-            echo "CONFIG_CRYPTO_842=y" >> "$CONFIG_FILE"
-            echo "CONFIG_CRYPTO_LZ4K_OPLUS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_ZRAM_WRITEBACK=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_CRYPTO_LZ4HC=y"
+            set_config "CONFIG_CRYPTO_LZ4K=y"
+            set_config "CONFIG_CRYPTO_LZ4KD=y"
+            set_config "CONFIG_CRYPTO_842=y"
+            set_config "CONFIG_CRYPTO_LZ4K_OPLUS=y"
+            set_config "CONFIG_ZRAM_WRITEBACK=y"
           fi
 
           # LSM配置*
           if [ "${{ github.event.inputs.LSM_BBG }}" = "true" ]; then
-            echo "CONFIG_BBG=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_BBG=y"
           fi
 
           # DROID_SPACES配置*
           if [ "${{ github.event.inputs.DROID_SPACES }}" = "true" ]; then
-            echo "CONFIG_NTSYNC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_SYSVIPC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_DEVTMPFS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_PID_NS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IPC_NS=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NAMESPACES=y" >> "$CONFIG_FILE"
-            echo "CONFIG_POSIX_MQUEUE=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NETFILTER_XT_TARGET_REJECT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NETFILTER_XT_TARGET_LOG=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_NTSYNC=y"
+            set_config "CONFIG_SYSVIPC=y"
+            set_config "CONFIG_DEVTMPFS=y"
+            set_config "CONFIG_PID_NS=y"
+            set_config "CONFIG_IPC_NS=y"
+            set_config "CONFIG_NAMESPACES=y"
+            set_config "CONFIG_POSIX_MQUEUE=y"
+            set_config "CONFIG_NETFILTER_XT_TARGET_REJECT=y"
+            set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
+            set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
           fi
 
           # IPSET & IPv6_NAT配置*
           if [ "${{ github.event.inputs.NETFILTER }}" = "true" ]; then
             if [[ "$KERNEL_VERSION" != "6.12" && "${CPU}" != mt* ]]; then
-              echo "CONFIG_BPF_STREAM_PARSER=y" >> "$CONFIG_FILE"
+              set_config "CONFIG_BPF_STREAM_PARSER=y"
             fi
-            echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> "$CONFIG_FILE"
-            echo "CONFIG_NETFILTER_XT_SET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_MAX=65534" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_BITMAP_IP=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_BITMAP_PORT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IP=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IPMARK=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IPPORT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_IPMAC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_MAC=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_NET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_NETNET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP_SET_LIST_SET=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP6_NF_NAT=y" >> "$CONFIG_FILE"
-            echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> "$CONFIG_FILE"
+            set_config "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
+            set_config "CONFIG_NETFILTER_XT_SET=y"
+            set_config "CONFIG_IP_SET=y"
+            set_config "CONFIG_IP_SET_MAX=65534"
+            set_config "CONFIG_IP_SET_BITMAP_IP=y"
+            set_config "CONFIG_IP_SET_BITMAP_IPMAC=y"
+            set_config "CONFIG_IP_SET_BITMAP_PORT=y"
+            set_config "CONFIG_IP_SET_HASH_IP=y"
+            set_config "CONFIG_IP_SET_HASH_IPMARK=y"
+            set_config "CONFIG_IP_SET_HASH_IPPORT=y"
+            set_config "CONFIG_IP_SET_HASH_IPPORTIP=y"
+            set_config "CONFIG_IP_SET_HASH_IPPORTNET=y"
+            set_config "CONFIG_IP_SET_HASH_IPMAC=y"
+            set_config "CONFIG_IP_SET_HASH_MAC=y"
+            set_config "CONFIG_IP_SET_HASH_NETPORTNET=y"
+            set_config "CONFIG_IP_SET_HASH_NET=y"
+            set_config "CONFIG_IP_SET_HASH_NETNET=y"
+            set_config "CONFIG_IP_SET_HASH_NETPORT=y"
+            set_config "CONFIG_IP_SET_HASH_NETIFACE=y"
+            set_config "CONFIG_IP_SET_LIST_SET=y"
+            set_config "CONFIG_IP6_NF_NAT=y"
+            set_config "CONFIG_IP6_NF_TARGET_MASQUERADE=y"
           fi
 
-          # 修复构建问题
-          if [[ "$KERNEL_VERSION" == "6.1" && "${CPU}" == mt* ]]; then
-            echo "CONFIG_DEBUG_INFO_BTF=n" >> "$CONFIG_FILE"
-          fi
+          # 构建优化
           if [[ "$ENABLE_RUST" == "true" ]]; then
-            echo "CONFIG_RUST=y" >> "$CONFIG_FILE"
-            echo "CONFIG_ANDROID_BINDER_IPC_RUST=m" >> "$CONFIG_FILE"
+            set_config "CONFIG_RUST=y"
+            set_config "CONFIG_ANDROID_BINDER_IPC_RUST=m"
           fi
 
           # 移除构建审查
@@ -1279,22 +1291,40 @@ jobs:
             USE_LLVM_IAS=false
           fi
 
-          # 从 build.config.common 读取 CLANG_PREBUILT_BIN
+          # 强制递推路径
+          CLANG_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/clang-tools' \; -print | head -1)
+          if [[ -n "$CLANG_TOOLS_PREBUILT_NAME" ]]; then
+            CLANG_TOOLS_PREBUILT_NAME="$(basename "$CLANG_TOOLS_PREBUILT_NAME")/clang-tools"
+          else
+            CLANG_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/clang/host/linux-x86' \; -print | head -1)
+            CLANG_TOOLS_PREBUILT_NAME="$(basename "$CLANG_TOOLS_PREBUILT_NAME")/clang"
+          fi
+          echo "✅ CLANG_TOOLS_PREBUILT_NAME=$CLANG_TOOLS_PREBUILT_NAME"
+
+          KERNEL_BUILD_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/kernel-build-tools' \; -print | head -1)
+          KERNEL_BUILD_TOOLS_PREBUILT_NAME=$(basename "${KERNEL_BUILD_TOOLS_PREBUILT_NAME:-}")
+          echo "✅ KERNEL_BUILD_TOOLS_PREBUILT_NAME=$KERNEL_BUILD_TOOLS_PREBUILT_NAME"
+
+          if [[ "$ENABLE_RUST" == "true" ]]; then
+            RUST_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/rust' \; -print | head -1)
+            RUST_TOOLS_PREBUILT_NAME=$(basename "${RUST_TOOLS_PREBUILT_NAME:-}")
+            echo "✅ RUST_TOOLS_PREBUILT_NAME=$RUST_TOOLS_PREBUILT_NAME"
+          fi
+
+          # 从 build.config.common 读取 CLANG_PREBUILT_BIN，或者用递推路径 fallback
           CLANG_PREBUILT_BIN=""
           for f in ./common/build.config.common ./"$KERNEL_REPOS"/build.config.common; do
             [[ -f "$f" ]] || continue
             CLANG_PREBUILT_BIN=$(grep '^CLANG_PREBUILT_BIN=' "$f" | cut -d'=' -f2)
             [[ -n "$CLANG_PREBUILT_BIN" ]] && break
           done
+
           if [[ -z "$CLANG_PREBUILT_BIN" ]]; then
-            echo "⚠️ CLANG_PREBUILT_BIN 未在 build.config.common 中找到，回退至官方构建脚本"
-            echo "fallback=true" >> "$GITHUB_OUTPUT"
-            echo "请考虑关闭 FAST_BUILD 并提交问题"
-            exit 0
+            CLANG_PREBUILT_BIN="${CLANG_TOOLS_PREBUILT_NAME}/host/linux-x86/clang-zakozako/bin"
           fi
 
-          # 优先尝试从 CLANG_PREBUILT_BIN 提取 clang-r
-          if [[ "$CLANG_PREBUILT_BIN" =~ (clang-r[0-9a-z]+) ]]; then
+          # 优先尝试从 CLANG_PREBUILT_BIN 识别出 clang-r，再去掉 clang-，作为 CLANG_VERSION
+          if [[ "$CLANG_PREBUILT_BIN" =~ clang-(r[0-9a-z]+) ]]; then
             CLANG_VERSION="${BASH_REMATCH[1]}"
           else
             # 如果未匹配到，尝试从 build.config.constants 提取
@@ -1310,98 +1340,81 @@ jobs:
             exit 0
           fi
 
-          # 替换成新的 CLANG_VERSION 值 (rxxxx)
-          CLANG_PREBUILT_BIN=${CLANG_PREBUILT_BIN/\$\{CLANG_VERSION\}/$CLANG_VERSION}
-          # 获取 CLANG_PREBUILT_BIN 的第一个目录名，赋值给 CLANG_PREBUILT_NAME (prebuilts？prebuilts-master？)
-          CLANG_PREBUILT_NAME=$(echo "$CLANG_PREBUILT_BIN" | cut -d'/' -f1)
-          # 获取 CLANG_PREBUILT_BIN 的上一级目录名，赋值给 CLANG_FULL_VNAME (clang-rxxxx)
-          CLANG_FULL_VNAME=$(basename "$(dirname "$CLANG_PREBUILT_BIN")")
+          CLANG_PREBUILT_BIN="${CLANG_PREBUILT_BIN/\$\{CLANG_VERSION\}/$CLANG_VERSION}"
+          CLANG_PREBUILT_BIN="${CLANG_PREBUILT_BIN/clang-zakozako/clang-${CLANG_VERSION}}"
 
-          echo "-----------------------"
           echo "✅ CLANG_PREBUILT_BIN=$CLANG_PREBUILT_BIN"
           echo "✅ CLANG_VERSION=$CLANG_VERSION"
-          echo "✅ CLANG_PREBUILT_NAME=$CLANG_PREBUILT_NAME"
-          echo "✅ CLANG_FULL_VNAME=$CLANG_FULL_VNAME"
           echo "✅ USE_LLVM_IAS=$USE_LLVM_IAS"
-          echo "-----------------------"
 
           set +u
           source "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/build/kernel/_setup_env.sh" 2>/dev/null || true
           set -u
 
           export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_PREBUILT_BIN:$PATH"
-          export LIBCLANG_PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_FULL_VNAME/lib"
+          export LIBCLANG_PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/clang-${CLANG_VERSION}/lib"
           export PATH="/usr/lib/ccache:$PATH"
 
           # BINDGEN 检测与 fallback
           if [[ "$ENABLE_RUST" == "true" ]]; then
-            BINDGEN_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/clang-tools/linux-x86/bin/bindgen"
-            if [ ! -x "$BINDGEN_BIN" ]; then
-              BINDGEN_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/clang-tools/linux-x86/bin/bindgen"
-            fi
+            BINDGEN_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_TOOLS_PREBUILT_NAME/linux-x86/bin/bindgen"
             if [ -x "$BINDGEN_BIN" ]; then
               export BINDGEN="$BINDGEN_BIN"
               echo "✅ bindgen exists: $BINDGEN_BIN"
-              echo "✅ BINDGEN version: $($BINDGEN_BIN --version | head -n1)"
             else
               echo "⚠️ prebuilts bindgen 未找到，fallback 到 cargo 安装 bindgen 0.69.5"
+              echo "::group::Install bindgen via cargo"
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
               source "$HOME/.cargo/env"
               cargo install bindgen-cli --version 0.69.5
+              echo "::endgroup::"
               BINDGEN_BIN=$(which bindgen)
               export BINDGEN="$BINDGEN_BIN"
               echo "✅ BINDGEN_BIN (cargo): $BINDGEN_BIN"
-              echo "✅ BINDGEN version: $($BINDGEN_BIN --version | head -n1)"
             fi
           fi
 
           # PAHOLE 检测与 fallback
-          PAHOLE_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/kernel-build-tools/linux-x86/bin/pahole"
+          PAHOLE_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$KERNEL_BUILD_TOOLS_PREBUILT_NAME/kernel-build-tools/linux-x86/bin/pahole"
           if [ ! -x "$PAHOLE_BIN" ]; then
-            echo "⚠️ prebuilts pahole 未找到: $PAHOLE_BIN"
-            PAHOLE_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/kernel-build-tools/linux-x86/bin/pahole"
+            PAHOLE_BIN="$(which pahole 2>/dev/null)"
+            [ -x "$PAHOLE_BIN" ] && echo "⚠️ pahole fallback to PATH: $PAHOLE_BIN"
           fi
-          if [ ! -x "$PAHOLE_BIN" ]; then
-            echo "⚠️ prebuilts pahole 未找到: $PAHOLE_BIN"
-            PAHOLE_BIN=$(which pahole 2>/dev/null || true)
-            if [ -x "$PAHOLE_BIN" ]; then
-              echo "✅ pahole fallback to PATH: $PAHOLE_BIN"
-            else
-              echo "❌ pahole 完全缺失，终止构建"
-              exit 13
-            fi
-          else
+          if [ -x "$PAHOLE_BIN" ]; then
             echo "✅ pahole exists: $PAHOLE_BIN"
+          else
+            echo "❌ pahole 完全缺失，终止构建"
+            exit 13
           fi
 
           # RUSTC 检测与 fallback
           if [[ "$ENABLE_RUST" == "true" ]]; then
-            RUSTC_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts/rust/linux-x86/$RUSTC_VERSION/bin/rustc"
+            RUSTC_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$RUST_TOOLS_PREBUILT_NAME/rust/linux-x86/$RUSTC_VERSION/bin/rustc"
             if [ ! -x "$RUSTC_BIN" ]; then
-              echo "⚠️ prebuilts rustc 未找到: $RUSTC_BIN"
-              RUSTC_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/prebuilts-master/rust/linux-x86/$RUSTC_VERSION/bin/rustc"
+              RUSTC_BIN="$(which rustc 2>/dev/null)"
+              [ -x "$RUSTC_BIN" ] && echo "⚠️ rustc fallback to PATH: $RUSTC_BIN"
             fi
-            if [ ! -x "$RUSTC_BIN" ]; then
-              echo "⚠️ prebuilts rustc 未找到: $RUSTC_BIN"
-              RUSTC_BIN=$(which rustc 2>/dev/null || true)
-              if [ -x "$RUSTC_BIN" ]; then
-                echo "✅ rustc fallback to PATH: $RUSTC_BIN"
-              else
-                echo "❌ rustc 完全缺失且 ENABLE_RUST=true，终止构建"
-                exit 13
-              fi
-            else
+            if [ -x "$RUSTC_BIN" ]; then
               echo "✅ rustc exists: $RUSTC_BIN"
+            else
+              echo "❌ rustc 完全缺失且 ENABLE_RUST=true，终止构建"
+              exit 13
             fi
           fi
 
-          LDCACHE_DIR="${GITHUB_WORKSPACE}/kernel_workspace/.thinlto-cache"
-          mkdir -p "$LDCACHE_DIR"
-          LD_WRAPPER="${GITHUB_WORKSPACE}/kernel_workspace/ld-wrapper"
-          printf '#!/bin/bash\nexec ld.lld "$@" --thinlto-cache-dir="%s" --thinlto-cache-policy=cache_size_bytes=3g --thinlto-jobs=%s\n' \
-            "$LDCACHE_DIR" "$(nproc --all)" > "$LD_WRAPPER"
-          chmod +x "$LD_WRAPPER"
-          echo "✅ ld-wrapper 已创建: $LD_WRAPPER (cache=$LDCACHE_DIR)"
+          LD_WRAPPER=""
+          if [ "${{ github.event.inputs.BUILD_NOCACHE }}" = "false" ] && [[ "$KERNEL_VERSION" == 5.* ]]; then
+            LDCACHE_DIR="${GITHUB_WORKSPACE}/kernel_workspace/.thinlto-cache"
+            mkdir -p "$LDCACHE_DIR"
+            LD_WRAPPER="${GITHUB_WORKSPACE}/kernel_workspace/ld-wrapper"
+            LLD_BIN="$(command -v ld.lld)"
+            if [[ -z "$LLD_BIN" ]]; then
+              echo "⚠️ ld.lld 未找到，无法创建 ld-wrapper"
+            fi
+            printf '#!/bin/bash\nexec "%s" "$@" --thinlto-cache-dir="%s" --thinlto-cache-policy=cache_size_bytes=3g --thinlto-jobs=%s\n' "$LLD_BIN" "$LDCACHE_DIR" "$(nproc --all)" > "$LD_WRAPPER"
+            chmod +x "$LD_WRAPPER"
+            echo "✅ ld-wrapper 已创建: $LD_WRAPPER (lld=$LLD_BIN, cache=$LDCACHE_DIR)"
+          fi
 
           cd ./common
 
@@ -1422,23 +1435,27 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu-
             CC="ccache clang"
             HOSTCC="ccache clang"
-            LD="$LD_WRAPPER"
             HOSTLD=ld.lld
             PAHOLE="$PAHOLE_BIN"
             KCFLAGS="$KCFLAGS"
           )
 
+          if [[ -n "$LD_WRAPPER" ]]; then
+            MAKE_ARGS+=(LD="$LD_WRAPPER")
+          else
+            MAKE_ARGS+=(LD=ld.lld)     
+          fi
           if [[ "$USE_LLVM_IAS" == "true" ]]; then
-            MAKE_ARGS=(LLVM_IAS=1 "${MAKE_ARGS[@]}")
+            MAKE_ARGS+=(LLVM_IAS=1)
           fi
           if [[ "$ENABLE_RUST" == "true" ]]; then
-            MAKE_ARGS=(RUSTC="$RUSTC_BIN" "${MAKE_ARGS[@]}")
+            MAKE_ARGS+=(RUSTC="$RUSTC_BIN")
           fi
 
-          make O=out "${MAKE_ARGS[@]}" gki_defconfig
+          make O=out "${MAKE_ARGS[@]}" gki_defconfig --no-print-directory
 
-          if [[ "$KERNEL_VERSION" == "5.10" || "$KERNEL_VERSION" == "5.15" ]]; then
-            echo ">> 设置 LTO = thin"
+          if [[ "$KERNEL_VERSION" == 5.* ]]; then
+            echo "# 设置 LTO = thin"
             scripts/config --file out/.config -e LTO_CLANG
             scripts/config --file out/.config -e LTO_CLANG_THIN
             scripts/config --file out/.config -d LTO_CLANG_NONE
@@ -1446,14 +1463,14 @@ jobs:
           fi
 
           if [[ "$KERNEL_VERSION" == "6.12" ]]; then
-            echo ">> 设置 LTO = none"
+            echo "# 设置 LTO = none"
             scripts/config --file out/.config -e LTO_CLANG
             scripts/config --file out/.config -e LTO_CLANG_NONE
             scripts/config --file out/.config -d LTO_CLANG_THIN
             scripts/config --file out/.config -d LTO_CLANG_FULL
           fi
 
-          make O=out "${MAKE_ARGS[@]}" olddefconfig
+          make O=out "${MAKE_ARGS[@]}" olddefconfig --no-print-directory
           make -j"$(nproc --all)" O=out "${MAKE_ARGS[@]}"
           ccache -s
 
@@ -1857,6 +1874,43 @@ jobs:
             echo "Telegram upload may have failed. HTTP code: $http_code"
             sed -n '1,200p' /tmp/telegram_resp.txt || true
           fi
+
+      - name: Check Cache Size Before Save
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' }}
+        id: cache_size_check
+        run: |
+          check_size() {
+            local CACHE_DIR="$1"
+            local CACHE_NAME="$2"
+            if [[ ! -d "$CACHE_DIR" ]]; then
+              echo "${CACHE_NAME}_save=false" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            SIZE_MB=$(du -sm "$CACHE_DIR" | cut -f1)
+            echo "$CACHE_DIR 大小: ${SIZE_MB}MB"
+            if (( SIZE_MB >= 5 )); then
+              echo "${CACHE_NAME}_save=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning title=Cache Warning::$CACHE_NAME 小于 5MB，跳过保存"
+              echo "${CACHE_NAME}_save=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          check_size "${{ env.CCACHE_DIR }}" "ccache"
+          check_size "${{ github.workspace }}/kernel_workspace/.thinlto-cache" "thinlto"
+
+      - name: Save Ccache
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' && steps.cache_size_check.outputs.ccache_save == 'true' && steps.restore-ccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-${{ env.BUILD_METHOD }}-${{ github.event.inputs.FAST_BUILD == 'true' && 'alpha' || 'beta' }}-16.8
+
+      - name: Save ThinLTO Cache
+        if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' && github.event.inputs.FAST_BUILD == 'true' && steps.cache_size_check.outputs.thinlto_save == 'true' && steps.restore-thinlto.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/.thinlto-cache
+          key: thinlto-${{ runner.os }}-${{ github.ref_name }}-${{ github.event.inputs.FILE }}-16.8
 
       - name: Post-build Disk Check
         run: df -h

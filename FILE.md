@@ -1,5 +1,7 @@
 ### 这里是目前支持的所有机型及其对应大安卓版本清单
 ### ``This list shows all currently supported device models and their Android versions.``
+#### 如果有特殊后缀``AOSP``、``bak``、``Canary``，建议优先使用它们；``global``后缀是特殊处理的同机型，请确保适用
+#### ``If there are special suffixes such as AOSP, bak, or Canary, it is recommended to prioritize using them; the global suffix refers to a specially handled variant of the same device model, so please ensure compatibility.``
 
 ```
 # Android16
@@ -37,7 +39,6 @@ oneplus_pad_2_pro_b
 oneplus_pad_3_b
 oneplus_ace5_race_b
 oneplus_ace5_ultra_b
-oneplus_ace5_ultra_bak_b
 oneplus_pad2_mt6991_b
 oneplus_ace_6
 oneplus_turbo_6
@@ -45,6 +46,8 @@ oneplus_ace_6t
 oneplus_15r
 oneplus_15
 oneplus_15t
+oneplus_pad_3_pro
+oneplus_pad_4
 realme_neo_8
 realme_neo6_se_b
 realme_gt_neo6_b

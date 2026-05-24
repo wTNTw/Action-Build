@@ -563,6 +563,11 @@ jobs:
             rm -f "$dir/android/abi_gki_protected_exports_"* 2>/dev/null || echo "No protected exports in $dir"
           done
 
+          if grep -q 'check_defconfig = None,' kernel_platform/build/kernel/kleaf/common_kernels.bzl; then
+            sed -i 's/check_defconfig = None,/check_defconfig = "disabled",/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
+            sed -i 's/if check_defconfig == None:/if False:  # check_defconfig == None:/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
+          fi
+
       - name: Kernel Version Handling
         run: |
           cd kernel_workspace/kernel_platform
@@ -1104,9 +1109,16 @@ jobs:
           MANAGER_BRANCH="${{ steps.manager.outputs.manager_branch }}"
 
           set_config() {
-            local key="${1%%=*}"
-            sed -i "/^${key}=/d" "$CONFIG_FILE"
-            echo "$1" >> "$CONFIG_FILE"
+            local val="$1"
+            local key="${val%%=*}"
+            if grep -qF "${key}=" "$CONFIG_FILE" || grep -qF "# ${key} is not set" "$CONFIG_FILE"; then
+              VAL="$val" awk -v key="$key" '
+                $0 == "# " key " is not set" || index($0, key "=") == 1 { print ENVIRON["VAL"]; next }
+                { print }
+              ' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE" || rm -f "${CONFIG_FILE}.tmp"
+            else
+              printf '%s\n' "$val" >> "$CONFIG_FILE"
+            fi
           }
 
           # ReSukiSU配置
@@ -1292,14 +1304,9 @@ jobs:
           fi
 
           # 强制递推路径
-          CLANG_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/clang-tools' \; -print | head -1)
-          if [[ -n "$CLANG_TOOLS_PREBUILT_NAME" ]]; then
-            CLANG_TOOLS_PREBUILT_NAME="$(basename "$CLANG_TOOLS_PREBUILT_NAME")/clang-tools"
-          else
-            CLANG_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/clang/host/linux-x86' \; -print | head -1)
-            CLANG_TOOLS_PREBUILT_NAME="$(basename "$CLANG_TOOLS_PREBUILT_NAME")/clang"
-          fi
-          echo "✅ CLANG_TOOLS_PREBUILT_NAME=$CLANG_TOOLS_PREBUILT_NAME"
+          CLANG_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/clang/host/linux-x86' \; -print | head -1)
+          CLANG_PREBUILT_NAME=$(basename "${CLANG_PREBUILT_NAME:-}")
+          echo "✅ CLANG_PREBUILT_NAME=$CLANG_PREBUILT_NAME"
 
           KERNEL_BUILD_TOOLS_PREBUILT_NAME=$(find "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform" -maxdepth 1 -type d -name 'prebuilts*' -exec test -d '{}/kernel-build-tools' \; -print | head -1)
           KERNEL_BUILD_TOOLS_PREBUILT_NAME=$(basename "${KERNEL_BUILD_TOOLS_PREBUILT_NAME:-}")
@@ -1313,14 +1320,12 @@ jobs:
 
           # 从 build.config.common 读取 CLANG_PREBUILT_BIN，或者用递推路径 fallback
           CLANG_PREBUILT_BIN=""
-          for f in ./common/build.config.common ./"$KERNEL_REPOS"/build.config.common; do
-            [[ -f "$f" ]] || continue
-            CLANG_PREBUILT_BIN=$(grep '^CLANG_PREBUILT_BIN=' "$f" | cut -d'=' -f2)
-            [[ -n "$CLANG_PREBUILT_BIN" ]] && break
-          done
+          if [[ -f ./common/build.config.common ]]; then
+            CLANG_PREBUILT_BIN=$(grep '^CLANG_PREBUILT_BIN=' ./common/build.config.common | cut -d'=' -f2-)
+          fi
 
           if [[ -z "$CLANG_PREBUILT_BIN" ]]; then
-            CLANG_PREBUILT_BIN="${CLANG_TOOLS_PREBUILT_NAME}/host/linux-x86/clang-zakozako/bin"
+            CLANG_PREBUILT_BIN="${CLANG_PREBUILT_NAME}/clang/host/linux-x86/clang-zakozako/bin"
           fi
 
           # 优先尝试从 CLANG_PREBUILT_BIN 识别出 clang-r，再去掉 clang-，作为 CLANG_VERSION
@@ -1352,12 +1357,21 @@ jobs:
           set -u
 
           export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_PREBUILT_BIN:$PATH"
-          export LIBCLANG_PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/clang-${CLANG_VERSION}/lib"
+          CLANG_LIB_PATH="${CLANG_PREBUILT_BIN%/bin}"
+          if [[ -d "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_LIB_PATH/lib" ]]; then
+            export LIBCLANG_PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_LIB_PATH/lib"
+          elif [[ -d "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/clang-${CLANG_VERSION}/lib" ]]; then
+            export LIBCLANG_PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/clang-${CLANG_VERSION}/lib"
+          else
+            export LIBCLANG_PATH="$(clang --print-resource-dir 2>/dev/null | sed 's|/lib/clang/.*||')/lib" 
+            echo "⚠️ LIBCLANG_PATH fallback to system: $LIBCLANG_PATH"
+          fi
+          echo "✅ LIBCLANG_PATH=$LIBCLANG_PATH"
           export PATH="/usr/lib/ccache:$PATH"
 
           # BINDGEN 检测与 fallback
           if [[ "$ENABLE_RUST" == "true" ]]; then
-            BINDGEN_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_TOOLS_PREBUILT_NAME/linux-x86/bin/bindgen"
+            BINDGEN_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_PREBUILT_NAME/clang-tools/linux-x86/bin/bindgen"
             if [ -x "$BINDGEN_BIN" ]; then
               export BINDGEN="$BINDGEN_BIN"
               echo "✅ bindgen exists: $BINDGEN_BIN"
@@ -1396,6 +1410,7 @@ jobs:
             fi
             if [ -x "$RUSTC_BIN" ]; then
               echo "✅ rustc exists: $RUSTC_BIN"
+              export RUSTC="$RUSTC_BIN"
             else
               echo "❌ rustc 完全缺失且 ENABLE_RUST=true，终止构建"
               exit 13
@@ -1416,6 +1431,12 @@ jobs:
             echo "✅ ld-wrapper 已创建: $LD_WRAPPER (lld=$LLD_BIN, cache=$LDCACHE_DIR)"
           fi
 
+          REAL_CLANG_BIN="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_PREBUILT_BIN/clang"
+          CC_WRAPPER="$GITHUB_WORKSPACE/kernel_workspace/cc-wrapper"
+          printf '#!/bin/bash\nexec ccache "%s" "$@"\n' "$REAL_CLANG_BIN" > "$CC_WRAPPER"
+          chmod +x "$CC_WRAPPER"
+          echo "✅ cc-wrapper 已创建: $CC_WRAPPER (clang=$REAL_CLANG_BIN)"
+
           cd ./common
 
           # 重映射物理路径
@@ -1427,17 +1448,19 @@ jobs:
           FPMAP="-ffile-prefix-map=$ROOT_REAL_PATH=."
 
           # KCFLAGS
-          KCFLAGS="$MAP $MPMAP $FPMAP -no-canonical-prefixes -Wno-error -D__ANDROID_COMMON_KERNEL__"
+          KCFLAGS="$MAP $FPMAP -no-canonical-prefixes -O2 -pipe -Wno-error -fno-stack-protector -D__ANDROID_COMMON_KERNEL__"
+          KCPPFLAGS="$MPMAP"
 
           MAKE_ARGS=(
             LLVM=1
             ARCH=arm64
             CROSS_COMPILE=aarch64-linux-gnu-
-            CC="ccache clang"
-            HOSTCC="ccache clang"
+            CC="$CC_WRAPPER"
+            HOSTCC="$CC_WRAPPER"
             HOSTLD=ld.lld
             PAHOLE="$PAHOLE_BIN"
             KCFLAGS="$KCFLAGS"
+            KCPPFLAGS="$KCPPFLAGS"
           )
 
           if [[ -n "$LD_WRAPPER" ]]; then
@@ -1450,6 +1473,7 @@ jobs:
           fi
           if [[ "$ENABLE_RUST" == "true" ]]; then
             MAKE_ARGS+=(RUSTC="$RUSTC_BIN")
+            MAKE_ARGS+=(BINDGEN="$BINDGEN_BIN")
           fi
 
           make O=out "${MAKE_ARGS[@]}" gki_defconfig --no-print-directory
@@ -1459,14 +1483,6 @@ jobs:
             scripts/config --file out/.config -e LTO_CLANG
             scripts/config --file out/.config -e LTO_CLANG_THIN
             scripts/config --file out/.config -d LTO_CLANG_NONE
-            scripts/config --file out/.config -d LTO_CLANG_FULL
-          fi
-
-          if [[ "$KERNEL_VERSION" == "6.12" ]]; then
-            echo "# 设置 LTO = none"
-            scripts/config --file out/.config -e LTO_CLANG
-            scripts/config --file out/.config -e LTO_CLANG_NONE
-            scripts/config --file out/.config -d LTO_CLANG_THIN
             scripts/config --file out/.config -d LTO_CLANG_FULL
           fi
 

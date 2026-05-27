@@ -50,10 +50,10 @@ on:
           - oneplus_pad_3_b
           - oneplus_ace5_race_b
           - oneplus_ace5_ultra_b
-          - oneplus_ace5_ultra_bak_b
           - oneplus_pad2_mt6991_b
           - oneplus_ace_6
           - oneplus_turbo_6
+          - oneplus_nord_6
           - oneplus_ace_6t
           - oneplus_ace_6t_Canary
           - oneplus_15r
@@ -1014,11 +1014,19 @@ jobs:
 
           echo "为 oplus_bsp_midas 模块返回幽灵任务以避免空指针崩溃..."
           patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch" || true
-          echo "拓展 ntsync 支持..."
+
           if [ "$KMI" = "android16-6.12" ]; then
             rm -f include/uapi/linux/ntsync.h
             rm -f drivers/misc/ntsync.c
+            echo "补全 IPC NS 符号导出..."
+            if ! grep -q 'EXPORT_SYMBOL.*put_ipc_ns' ./ipc/namespace.c; then
+              echo -e '\nEXPORT_SYMBOL_GPL(put_ipc_ns);' >> ./ipc/namespace.c
+            fi
+            if ! grep -q 'EXPORT_SYMBOL.*init_ipc_ns' ./ipc/msgutil.c; then
+              echo -e '\nEXPORT_SYMBOL_GPL(init_ipc_ns);' >> ./ipc/msgutil.c
+            fi
           fi
+          echo "拓展 ntsync 支持..."
           patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch" || true
           if [[ "$FILE" == oneplus_10r* ]]; then
             patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch" || true

@@ -42,6 +42,7 @@ oneplus_ace5_ultra_b
 oneplus_pad2_mt6991_b
 oneplus_ace_6
 oneplus_turbo_6
+oneplus_nord_6
 oneplus_ace_6t
 oneplus_15r
 oneplus_15

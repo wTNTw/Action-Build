@@ -143,7 +143,7 @@ on:
         type: boolean
         description: "是否启用关键分区写入保护模块(BBG)？"
         required: true
-        default: true
+        default: false
       NETFILTER:
         type: boolean
         description: "是否启用网络功能拓展(NETFILTER)？"
@@ -168,7 +168,7 @@ on:
         type: boolean
         description: "是否添加轻量级Linux容器支持(DroidSpaces)？"
         required: true
-        default: false
+        default: true
       RE_KERNEL:
         type: boolean
         description: "是否添加Re-Kernel？"

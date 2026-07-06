@@ -134,6 +134,7 @@ oneplus_pad_3
 oneplus_ace5_race
 oneplus_ace5_ultra
 realme_gt5_v
+realme_gt_neo5se_v
 realme_gt5pro_v
 realme_gt6_v
 realme_gt_neo6_v

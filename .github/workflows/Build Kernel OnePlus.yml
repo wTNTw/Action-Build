@@ -18,7 +18,6 @@ on:
           - oneplus_11r_b
           - oneplus_ace2_b
           - oneplus_pad_lite_b
-          - oneplus_pad_lite_Canary_b
           - oneplus_pad_mt6983_b
           - oneplus_ace_2v_b
           - oneplus_ace_pro_v
@@ -56,19 +55,12 @@ on:
           - oneplus_turbo_6
           - oneplus_nord_6
           - oneplus_ace_6t
-          - oneplus_ace_6t_Canary
           - oneplus_15r
-          - oneplus_15r_Canary
           - oneplus_15
-          - oneplus_15_Canary
           - oneplus_15t
-          - oneplus_15t_Canary
           - oneplus_pad_3_pro
-          - oneplus_pad_3_pro_Canary
           - oneplus_pad_4
-          - oneplus_pad_4_Canary
           - oneplus_ace6_ultra
-          - oneplus_ace6_ultra_Canary
       MANAGER_SOURCE:
         type: choice
         description: "管理器调用方向//Manager download source"
@@ -546,6 +538,7 @@ jobs:
 
           echo "使用$MANIFEST_REPO/$MANIFEST_REPO_NAME($MANIFEST_BRANCH)初始化仓库..."
           repo init -u "$BASE_URL" -b "$MANIFEST_BRANCH" -m "${FILE}.xml" --depth=1 --no-clone-bundle --no-tags
+          sed -i -e '/prebuilts\/asuite"/{/ks-kernel\.lnx\.5\.0\.r3-rel/d}' -e '/tools\/tradefederation\/prebuilts"/{/ks-kernel\.lnx\.5\.0\.r3-rel/d}' ".repo/manifests/${FILE}.xml"
           repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
           KERNEL_REPOS=""

@@ -125,14 +125,15 @@ Prohibit the promotion of forked repositories with **no modifications**; see [LI
  
 - Support setting branches、custom version identifiers、fallback hash.  
 ```
-Set Branch: Change the original `susfs-main` to another `builtin` branch. Please modify according to the channel name in the ReSukiSU repository. Do not modify unless you are a developer. Do not leave it empty or remove it.
+Set Branch: Divided into manager-layer and built-in-layer. Please modify according to the channel name in the ReSukiSU repository. Do not modify unless you are a developer. Do not leave it empty or remove it.
 Custom Version Tag:
 Replace the original commit hash with your custom content, and move the commit hash to the end. This can be modified freely, but keep it reasonably short.
+The commit hash referred to here is the built-in-layer.
 v3.1.7-f5541e21@builtin
 ↓
 v3.1.7-CustomContent@builtin[f5541e21]
-If you don’t want to use a custom version tag, just leave it empty (e.g. susfs-main/).
-Regardless of whether the custom version identifier and fallback hash are enabled, they must be separated by two /(U+002F) and cannot be removed
+If you don’t want to use a custom version tag, just leave it empty (e.g. builtin/).
+Regardless of whether the custom version identifier and fallback hash are enabled, they must be separated by three /(U+002F) and cannot be removed.
 ```  
  
 - Fully automated retrieval of kernel information and build information.  

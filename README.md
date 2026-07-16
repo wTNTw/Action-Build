@@ -40,9 +40,9 @@
 >
 >>`_？ Android19 (？)`
 >
->>`_？ Android18 (？)`
+>>`_？ Android18 (？)`<strong>
 >
->>`_c Android17 (Cinnamon Bun)`<strong>
+>>`_c Android17 (Cinnamon Bun)`
 >
 >>`_b Android16 (Baklava)`
 >
@@ -63,8 +63,8 @@
 >|| 平均耗时范围|最大耗时|
 >|------------------|----------------------|------------|
 >| `极速构建所有机型` | `1st:17min ~ 36min 2nd:6min ~ 17min` | `40/29min`|
->| `内核版本5.10-5.15使用官方脚本构建` | `29min ~ 35min`| `45min`    |
->| `内核版本6.1-6.12使用官方脚本构建` | `59min ~ 1h12min`| `1h28min` |
+>| `内核版本5.10-5.15使用官方脚本构建` | `20min ~ 35min`| `45min`    |
+>| `内核版本6.1-6.12使用官方脚本构建` | `55min ~ 1h12min`| `1h28min` |
 >
 > >使用ccache第一次可能会减速、仅极速构建生效
 >
@@ -95,7 +95,17 @@
 # 更新日志
 >小的更新内容将被忽略 更多内容请参看提交
  
-- 新增路径递推,完整适配内核版本`6.12+`的`Rust`构建逻辑和`bindgen`、`Kleaf`依赖，现在可以正常使用了  
+- 新增`FakeConfig(HideConfig)`，用于隐藏`proc/config.gz`内配置项可见性  
+```
+普通配置项:
+set_config "CONFIG_IP_NF_TARGET_ECN=y"
+隐藏配置项:
+set_hide_config "CONFIG_IP6_NF_NAT=y"
+```  
+ 
+- 新增`FakePatch`完善多内核等级与`susfs`的兼容问题  
+ 
+- 新增路径递推,完整适配内核版本`6.12+`的`Rust`构建逻辑和`bindgen`、`Kleaf`依赖搜索  
  
 - `lz4`自动跟随上游升级以及自动纠错  
  

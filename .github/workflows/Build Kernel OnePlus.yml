@@ -10,7 +10,7 @@ on:
         options:
           - oneplus_nord_n30_se_5g_v
           - oneplus_10r_v
-          - oneplus_nord_3_v
+          - oneplus_nord_3_b
           - oneplus_ace_v
           - oneplus_ace_race_v
           - oneplus_10_pro_b
@@ -671,10 +671,10 @@ jobs:
           KSU_VERSION=$(expr $(git rev-list --count "$KSU_MANAGER_BRANCH" 2>/dev/null || echo 13000) + 30700)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           if [ "$FAST_BUILD" = "false" ]; then
-            KSU_KBUILD="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/KernelSU/kernel/Kbuild"
-            if [[ -f "$KSU_KBUILD" ]]; then
-              sed -i 's|^LOCAL_GIT_EXISTS :=.*|LOCAL_GIT_EXISTS := 1|' "$KSU_KBUILD"
-              echo "✅ 已修复 Bazel 沙箱 git 检测"
+            KSU_SRC="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/KernelSU/kernel"
+            if [[ -f "$KSU_SRC/Kbuild" ]]; then
+              sed -i 's/-dirty//g' "$KSU_SRC/Kbuild"
+              sed -i "s|^KSU_SRC :=.*|KSU_SRC := $KSU_SRC|" "$KSU_SRC/Kbuild"
             fi
           fi
 

@@ -5,6 +5,7 @@
 
 ```
 # Android16
+oneplus_nord_3_b
 oneplus_10_pro_b
 oneplus_pad_lite_b
 oneplus_11r_b

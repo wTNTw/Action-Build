@@ -195,6 +195,7 @@ oneplus_10r_u
 oppo_find_n3_flip_u
 oppo_find_x6_u
 oppo_reno12_pro_mt6985_u
+realme_gt_neo3_u
 
 # Android13
 oneplus_11_t
@@ -202,6 +203,7 @@ oneplus_10r_t
 oneplus_ace_t
 oppo_find_n3_flip
 oppo_find_x6
+realme_gt_neo3_t
 
 # Android12
 oneplus_10_pro_s

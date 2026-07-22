@@ -18,6 +18,7 @@ oneplus_ace2_pro_b
 oneplus_ace3_b
 oneplus_open_b
 oneplus_nord_ce4_b
+oneplus_n6_b
 oneplus_12_b
 oneplus_pad_go_2_b
 oneplus_turbo_6x_b

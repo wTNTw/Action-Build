@@ -110,7 +110,7 @@ on:
         type: string
         description: "ZRAM(0关闭1开启)/算法名/大小//ZRAM (0: disable, 1: enable) / Algorithm name / Size"
         required: true
-        default: "0/lz4kd/12884901888"
+        default: "1/lz4/12884901888"
       SUFFIX:
         type: string
         description: "自定义内核后缀(不输入使用RAND_STR或-1关闭)//Custom kernel suffix (Leave blank to use RAND_STR, or -1 to disable)"
@@ -535,10 +535,12 @@ jobs:
           if [ "$ORIG_VERSION" != "$NEW_VERSION" ]; then
             echo "Kernel Version:$ORIG_VERSION->$NEW_VERSION"
             echo "CKERNEL_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+            echo "TKERNEL_VERSION=$NEW_VERSION" >> $GITHUB_ENV
             echo "DKERNEL_VERSION=$ORIG_VERSION" >> $GITHUB_ENV
           else
             echo "Kernel Version:$ORIG_VERSION No changes"
             echo "CKERNEL_VERSION=$ORIG_VERSION" >> $GITHUB_ENV
+          echo "TKERNEL_VERSION=$ORIG_VERSION" >> $GITHUB_ENV
           fi
 
           # 内核版本的数字转换，仅前两位不包含 SUBLEVEL
@@ -740,6 +742,8 @@ jobs:
             echo "正在打susfs补丁"
             patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             echo "susfs_patch完成"
+            SUSFS_COMMIT_HASH=$(cd ../../susfs4ksu && git rev-parse --short=8 HEAD)
+            echo "SUSFS_COMMIT_HASH=$SUSFS_COMMIT_HASH" >> $GITHUB_ENV
           fi
           source $REJ_CHECKER
           check_rejects .
@@ -1584,11 +1588,6 @@ jobs:
           mkdir -p release-assets
           cp -r ./AnyKernel3/* ./release-assets/ || true
 
-          if [ -d "./ZRAM-Module" ]; then
-            mkdir -p ./release-assets/ZRAM-Module
-            cp -r ./ZRAM-Module/* ./release-assets/ZRAM-Module/ || true
-          fi
-
           cd release-assets || exit 0
           zip -r "../${RELEASE_NAME}.zip" ./* || true
           cd ..
@@ -1740,6 +1739,50 @@ jobs:
           else
             echo "Telegram upload may have failed. HTTP code: $http_code"
             sed -n '1,200p' /tmp/telegram_resp.txt || true
+          fi
+
+
+      - name: Publish ZRAM Module to Telegram
+        if: success() && startsWith(github.event.inputs.ZRAM, '1/')
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RELEASE_NAME: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
+          RELEASE_MODEL: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping ZRAM Telegram publish."
+            exit 0
+          fi
+
+          if [ ! -d "./ZRAM-Module" ]; then
+            echo "ZRAM-Module directory not found. Skipping."
+            exit 0
+          fi
+
+          ZRAM_ZIP_NAME="ZRAM-Module_${RELEASE_NAME}.zip"
+          cd ZRAM-Module
+          zip -r "../${ZRAM_ZIP_NAME}" ./*
+          cd ..
+
+          if [ ! -f "${ZRAM_ZIP_NAME}" ]; then
+            echo "Failed to create ZRAM zip. Skipping."
+            exit 0
+          fi
+
+          CAPTION="ZRAM Module — ${RELEASE_MODEL} | Kernel: ${TKERNEL_VERSION}"
+          CAPTION+=$'\n\n⚠️ 需配合对应内核版本刷入'
+
+          http_code=$(curl -s -o /tmp/zram_telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document=@"${ZRAM_ZIP_NAME}" \
+            --form-string "caption=${CAPTION}"
+
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            echo "ZRAM Module uploaded to Telegram successfully."
+          else
+            echo "ZRAM Telegram upload may have failed. HTTP code: $http_code"
+            sed -n '1,200p' /tmp/zram_telegram_resp.txt || true
           fi
 
       - name: Check Cache Size Before Save

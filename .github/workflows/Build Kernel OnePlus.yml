@@ -1752,7 +1752,7 @@ jobs:
           files: |
             ./${{ steps.prepare_release.outputs.RELEASE_FILE }}
 
-      - name: Publish release file to Telegram
+      - name: Publish to Telegram (Kernel + ZRAM)
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -1767,10 +1767,21 @@ jobs:
             exit 0
           fi
 
-          FILE_PATH="./${RELEASE_FILE}"
-          if [ ! -f "$FILE_PATH" ]; then
-            echo "Release file not found: $FILE_PATH"
+          KERNEL_FILE="./${RELEASE_FILE}"
+          if [ ! -f "$KERNEL_FILE" ]; then
+            echo "Kernel release file not found: $KERNEL_FILE"
             exit 0
+          fi
+
+          # 准备 ZRAM 模块（如果启用）
+          ZRAM_FILE=""
+          if [[ "${{ github.event.inputs.ZRAM }}" == 1* ]] && [ -d "./ZRAM-Module" ]; then
+            ZRAM_ZIP_NAME="ZRAM-Module_${RELEASE_NAME}.zip"
+            cd ZRAM-Module && zip -qr "../${ZRAM_ZIP_NAME}" ./* && cd ..
+            if [ -f "${ZRAM_ZIP_NAME}" ]; then
+              ZRAM_FILE="${ZRAM_ZIP_NAME}"
+              echo "✅ ZRAM 模块已打包: ${ZRAM_FILE}"
+            fi
           fi
 
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_NAME}"
@@ -1804,61 +1815,43 @@ jobs:
           EOF
           )
 
-          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-            -F chat_id="${TELEGRAM_CHAT_ID}" \
-            -F document=@"${FILE_PATH}" \
-            --form-string "caption=${CAPTION}" \
-            -F "parse_mode=MarkdownV2")
+          # 如果有 ZRAM，用 sendMediaGroup 合并发送；否则用 sendDocument
+          if [ -n "$ZRAM_FILE" ]; then
+            echo "使用 sendMediaGroup 发送内核 + ZRAM 模块..."
+            MEDIA_JSON=$(cat <<JSONEOF
+          [
+            {
+              "type": "document",
+              "media": "attach://kernel",
+              "caption": $(printf '%s' "$CAPTION" | jq -Rs .),
+              "parse_mode": "MarkdownV2"
+            },
+            {
+              "type": "document",
+              "media": "attach://zram"
+            }
+          ]
+          JSONEOF
+          )
+            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMediaGroup" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F media="$MEDIA_JSON" \
+              -F kernel=@"${KERNEL_FILE}" \
+              -F zram=@"${ZRAM_FILE}")
+          else
+            echo "仅发送内核安装包..."
+            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document=@"${KERNEL_FILE}" \
+              --form-string "caption=${CAPTION}" \
+              -F "parse_mode=MarkdownV2")
+          fi
 
           if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-            echo "Uploaded to Telegram successfully."
+            echo "✅ Telegram 发送成功"
           else
-            echo "Telegram upload may have failed. HTTP code: $http_code"
+            echo "❌ Telegram 发送失败，HTTP code: $http_code"
             sed -n '1,200p' /tmp/telegram_resp.txt || true
-          fi
-
-
-      - name: Publish ZRAM Module to Telegram
-        if: success() && startsWith(github.event.inputs.ZRAM, '1/')
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          RELEASE_NAME: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
-          RELEASE_MODEL: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping ZRAM Telegram publish."
-            exit 0
-          fi
-
-          if [ ! -d "./ZRAM-Module" ]; then
-            echo "ZRAM-Module directory not found. Skipping."
-            exit 0
-          fi
-
-          ZRAM_ZIP_NAME="ZRAM-Module_${RELEASE_NAME}.zip"
-          cd ZRAM-Module
-          zip -r "../${ZRAM_ZIP_NAME}" ./*
-          cd ..
-
-          if [ ! -f "${ZRAM_ZIP_NAME}" ]; then
-            echo "Failed to create ZRAM zip. Skipping."
-            exit 0
-          fi
-
-          CAPTION="ZRAM Module — ${RELEASE_MODEL} | Kernel: ${TKERNEL_VERSION}"
-          CAPTION+=$'\n\n⚠️ 需配合对应内核版本刷入'
-
-          http_code=$(curl -s -o /tmp/zram_telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-            -F chat_id="${TELEGRAM_CHAT_ID}" \
-            -F document=@"${ZRAM_ZIP_NAME}" \
-            --form-string "caption=${CAPTION}")
-
-          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-            echo "ZRAM Module uploaded to Telegram successfully."
-          else
-            echo "ZRAM Telegram upload may have failed. HTTP code: $http_code"
-            sed -n '1,200p' /tmp/zram_telegram_resp.txt || true
           fi
 
       - name: Check Cache Size Before Save

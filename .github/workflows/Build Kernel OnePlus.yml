@@ -871,7 +871,7 @@ jobs:
           mkdir -p drivers/rekernel
           cp -r "${RE_DIR}"/* drivers/rekernel/
           if [ -f BUILD.bazel ]; then
-            sed -i '/"kernel_aarch64": {/,/"kernel_aarch64_16k": {/ s|"module_implicit_outs": get_gki_modules_list("arm64")|"module_implicit_outs": get_gki_modules_list("arm64") + ["drivers/rekernel/rekernel.ko"]|' BUILD.bazel
+            sed -i '0,/name = "kernel_aarch64",/{/module_implicit_outs/s|,$| + ["drivers/rekernel/rekernel.ko"],|}' BUILD.bazel
           fi
 
       - name: Apply DROID_SPACES

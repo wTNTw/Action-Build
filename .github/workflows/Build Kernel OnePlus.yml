@@ -1098,7 +1098,6 @@ jobs:
 
           # 构建依赖项调整及优化
           if [ "$KERNEL_VERSION" = "5.15" ] && [[ "$CPU" == mt* ]]; then
-            set_config "CONFIG_IKHEADERS=n"
             set_config "CONFIG_OPLUS_SYSTEM_KERNEL=y"
             set_config "CONFIG_OPLUS_FEATURE_CMDLINE=m"
             set_config "CONFIG_OPLUS_FEATURE_OPLUSBOOT=m"

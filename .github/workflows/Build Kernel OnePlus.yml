@@ -1776,7 +1776,7 @@ jobs:
           http_code=$(curl -s -o /tmp/zram_telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
             -F document=@"${ZRAM_ZIP_NAME}" \
-            --form-string "caption=${CAPTION}"
+            --form-string "caption=${CAPTION}")
 
           if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
             echo "ZRAM Module uploaded to Telegram successfully."

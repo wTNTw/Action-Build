@@ -91,6 +91,11 @@ on:
         description: "动态清单仓库所有者//Manifest repository owner"
         required: true
         default: "Numbersf"
+      KERNEL_DATE:
+        type: string
+        description: "按日期回退内核源码(YYYY-MM-DD，留空使用最新)//Rollback kernel source by date (YYYY-MM-DD, leave blank for latest)"
+        required: false
+        default: ""
       BUILD_TIME:
         type: string
         description: "自定义构建时间(输入F使用UTCT或-1关闭)//Custom build time (Enter F to use UTCT, or -1 to disable)"
@@ -330,6 +335,7 @@ jobs:
           echo "Selected ANDROID_VERSION: ${{ env.ANDROID_VERSION }}"
           echo "Selected BUILD_METHOD: ${{ env.BUILD_METHOD }}"
           echo "Selected FILE: ${{ github.event.inputs.FILE }}"
+          echo "Selected KERNEL_DATE: ${{ github.event.inputs.KERNEL_DATE }}"
           echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
           if [ "${{ github.event.inputs.SUSFS_CI }}" != "N/A" ]; then
             echo "::warning title=SUSFS Not Required::当前管理器已自带附加模块，无需启用 SUSFS 模块，强制启用可能导致不开机。"
@@ -449,6 +455,8 @@ jobs:
       - name: Initialize Repo and Sync
         env:
           FILE: ${{ github.event.inputs.FILE }}
+          KERNEL_DATE: ${{ github.event.inputs.KERNEL_DATE }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd kernel_workspace
           mkdir -p .repo/manifests
@@ -469,6 +477,74 @@ jobs:
             echo "KERNEL_REPOS=$KERNEL_REPOS" >> "$GITHUB_ENV"
           else
             echo "❎ 未找到 build.config.msm.common，可能是天玑清单或纯 Kleaf 构建结构"
+          fi
+
+          # 按日期回退内核源码（仅回退指向厂商分支 oneplus/realme/oppo 的内核 project）
+          # 必须在移除 ABI 保护/构建审查等 sed 修改之前执行，否则工作区不干净会导致 checkout 失败
+          if [ -n "$KERNEL_DATE" ]; then
+            if [[ ! "$KERNEL_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "❌ KERNEL_DATE 格式错误，应为 YYYY-MM-DD（例如 2026-07-17）"
+              exit 14
+            fi
+            echo "🔙 按日期回退内核源码到 ${KERNEL_DATE}（含当天，取当天或之前最后一个 commit）..."
+
+            XML=".repo/manifests/${FILE}.xml"
+            # 解析 origin 远程的 owner（fetch 地址）
+            ORIGIN_OWNER=$(grep -o 'name="origin"[^>]*' "$XML" | grep -o 'fetch="[^"]*"' | head -n1 | sed -E 's#fetch="##; s#"$##; s#https?://github.com/##; s#/+$##')
+            if [ -z "$ORIGIN_OWNER" ]; then
+              ORIGIN_OWNER=$(grep -o 'fetch="[^"]*"[^>]*name="origin"' "$XML" | head -n1 | sed -E 's#fetch="##; s#".*##; s#https?://github.com/##; s#/+$##')
+            fi
+            echo "origin owner=${ORIGIN_OWNER}"
+
+            AUTH_HEADER=()
+            if [ -n "$GH_TOKEN" ]; then
+              AUTH_HEADER=(-H "Authorization: Bearer ${GH_TOKEN}")
+            fi
+
+            ROLLBACK_COUNT=0
+            # 逐行解析清单中的 <project ...>，提取 name / path / revision
+            while IFS= read -r line; do
+              case "$line" in
+                *"<project"*) : ;;
+                *) continue ;;
+              esac
+              KREV=$(echo "$line" | grep -o 'revision="[^"]*"' | head -n1 | sed -E 's#revision="##; s#"$##')
+              case "$KREV" in
+                oneplus/*|realme/*|oppo/*) : ;;
+                *) continue ;;
+              esac
+              KNAME=$(echo "$line" | grep -o 'name="[^"]*"' | head -n1 | sed -E 's#name="##; s#"$##')
+              KPATH=$(echo "$line" | grep -o 'path="[^"]*"' | head -n1 | sed -E 's#path="##; s#"$##')
+              [ -z "$KPATH" ] && KPATH="$KNAME"
+              # 跳过指向当前目录的 project（如 modules/devicetree 仓库 path="./"），它不是内核源码
+              case "$KPATH" in
+                .|./) echo "跳过根路径 project ${KNAME} (path=${KPATH})"; continue ;;
+              esac
+              [ -e "${KPATH}/.git" ] || { echo "⚠️ ${KPATH} 不是 git 仓库，跳过"; continue; }
+              SLUG="${ORIGIN_OWNER}/${KNAME}"
+              echo "→ 处理 ${KPATH} (${SLUG}) 分支 ${KREV}"
+              API="https://api.github.com/repos/${SLUG}/commits?sha=${KREV}&until=${KERNEL_DATE}T23:59:59Z&per_page=1"
+              SHA=$(curl -sf "${AUTH_HEADER[@]}" -H "Accept: application/vnd.github+json" "$API" | grep -oP '"sha"[[:space:]]*:[[:space:]]*"\K[0-9a-f]{40}' | head -n1)
+              if [ -z "$SHA" ]; then
+                echo "❌ 未找到 ${SLUG} 在 ${KERNEL_DATE} 或之前的提交，请确认日期有效"
+                exit 15
+              fi
+              echo "✅ 目标 commit: ${SHA}"
+              git -C "${KPATH}" fetch --depth=1 "https://github.com/${SLUG}.git" "$SHA"
+              # 清理工作区，避免 repo sync 残留改动阻断 checkout
+              git -C "${KPATH}" reset --hard -q HEAD
+              git -C "${KPATH}" clean -fdq
+              git -C "${KPATH}" checkout -q --force FETCH_HEAD
+              ROLLBACK_COUNT=$((ROLLBACK_COUNT + 1))
+              echo "✅ ${SLUG} 已回退到 ${SHA}"
+            done < "$XML"
+
+            if [ "$ROLLBACK_COUNT" -eq 0 ]; then
+              echo "❌ 未找到可回退的内核仓库（清单中无指向厂商分支的 project）"
+              exit 14
+            fi
+            echo "KERNEL_DATE_APPLIED=${KERNEL_DATE}" >> "$GITHUB_ENV"
+            echo "🔙 内核源码日期回退完成，共回退 ${ROLLBACK_COUNT} 个仓库"
           fi
 
           # 移除 ABI 保护
@@ -1481,6 +1557,7 @@ jobs:
           printf '  "ZRAM_ALGO_U": "%s",\n' "${{ env.ZRAM_ALGO_U }}" >> metadata.json
           printf '  "BRANCH_NAME": "%s",\n' "${{ github.event.inputs.KSU_META }}" >> metadata.json
           printf '  "FILE": "%s",\n' "${{ github.event.inputs.FILE }}" >> metadata.json
+          printf '  "KERNEL_DATE": "%s",\n' "${{ github.event.inputs.KERNEL_DATE }}" >> metadata.json
           printf '  "ZRAM": "%s",\n' "${{ github.event.inputs.ZRAM }}" >> metadata.json
           printf '  "KPM": "%s",\n' "${{ github.event.inputs.KPM }}" >> metadata.json
           printf '  "SUFFIX": "%s",\n' "${{ github.event.inputs.SUFFIX }}" >> metadata.json

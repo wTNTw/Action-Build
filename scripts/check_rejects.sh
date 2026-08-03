@@ -27,8 +27,13 @@ check_rejects() {
 _reject_err_trap() {
   local ec=$?
   trap - ERR
-  check_rejects .
-  exit "$ec"
+  local REJ_FILES
+  REJ_FILES=$(find . -name "*.rej" 2>/dev/null)
+  if [ -n "$REJ_FILES" ]; then
+    check_rejects .
+    exit "$ec"
+  fi
+  trap '_reject_err_trap' ERR
 }
 
 

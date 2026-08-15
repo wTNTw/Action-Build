@@ -397,13 +397,6 @@ fun revert() {
             println("Reverting base.c Android 14 6.1 Fake Patch")
             f("fs/proc/base.c").deleteLine(Regex("""^#include <linux/dma-buf\.h>$"""))
         }
-        if (sublevel >= 157) {
-            println("Reverting namespace.c Android 14 6.1 Fake Patch")
-            f("fs/namespace.c").insertAfter(
-                Regex("""^#include "internal\.h"$"""),
-                "#include <trace/hooks/blk.h>"
-            )
-        }
     }
 
     if (kmi == "android15-6.6") {

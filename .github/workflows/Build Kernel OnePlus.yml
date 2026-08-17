@@ -1825,7 +1825,7 @@ jobs:
           ESC_URL=$(escape_mdv2 "${RELEASE_URL}")
           ESC_BRANCH=$(escape_mdv2 "${BRANCH_NAME}")
 
-          CAPTION=$(cat <<EOF
+          MESSAGE=$(cat <<EOF
           *ReSukiSU — ${ESC_BRANCH} Branch*
           *Release:* \`${ESC_NAME}\`
           *Model:* \`${ESC_MODEL}\`
@@ -1841,42 +1841,43 @@ jobs:
           EOF
           )
 
-          # 如果有 ZRAM，用 sendMediaGroup 合并发送；否则用 sendDocument
-          if [ -n "$ZRAM_FILE" ]; then
-            echo "使用 sendMediaGroup 发送内核 + ZRAM 模块..."
-            MEDIA_JSON=$(cat <<JSONEOF
-          [
-            {
-              "type": "document",
-              "media": "attach://kernel",
-              "caption": $(printf '%s' "$CAPTION" | jq -Rs .),
-              "parse_mode": "MarkdownV2"
-            },
-            {
-              "type": "document",
-              "media": "attach://zram"
-            }
-          ]
-          JSONEOF
-          )
-            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMediaGroup" \
-              -F chat_id="${TELEGRAM_CHAT_ID}" \
-              -F media="$MEDIA_JSON" \
-              -F kernel=@"${KERNEL_FILE}" \
-              -F zram=@"${ZRAM_FILE}")
+          # 1️⃣ 先上传内核安装包（不带 caption）
+          echo "上传内核安装包..."
+          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document=@"${KERNEL_FILE}")
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            echo "✅ 内核安装包上传成功"
           else
-            echo "仅发送内核安装包..."
-            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-              -F chat_id="${TELEGRAM_CHAT_ID}" \
-              -F document=@"${KERNEL_FILE}" \
-              --form-string "caption=${CAPTION}" \
-              -F "parse_mode=MarkdownV2")
+            echo "❌ 内核安装包上传失败，HTTP code: $http_code"
+            sed -n '1,200p' /tmp/telegram_resp.txt || true
           fi
 
+          # 2️⃣ 如有 ZRAM 模块，再单独上传 ZRAM 文件（不跟在消息后面）
+          if [ -n "$ZRAM_FILE" ]; then
+            echo "上传 ZRAM 模块..."
+            http_code=$(curl -s -o /tmp/telegram_resp_zram.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document=@"${ZRAM_FILE}")
+            if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+              echo "✅ ZRAM 模块上传成功"
+            else
+              echo "❌ ZRAM 模块上传失败，HTTP code: $http_code"
+              sed -n '1,200p' /tmp/telegram_resp_zram.txt || true
+            fi
+          fi
+
+          # 3️⃣ 最后发送消息
+          echo "发送消息..."
+          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            --form-string "text=${MESSAGE}" \
+            -F "parse_mode=MarkdownV2")
+
           if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-            echo "✅ Telegram 发送成功"
+            echo "✅ Telegram 消息发送成功"
           else
-            echo "❌ Telegram 发送失败，HTTP code: $http_code"
+            echo "❌ Telegram 消息发送失败，HTTP code: $http_code"
             sed -n '1,200p' /tmp/telegram_resp.txt || true
           fi
 

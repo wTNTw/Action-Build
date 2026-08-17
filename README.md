@@ -1,6 +1,6 @@
 **`简体中文`** | [English](README-en.md)
  
-[![Workflow Status](https://img.shields.io/github/actions/workflow/status/Numbersf/Action-Build/Build%20Kernel%20OnePlus.yml?branch=ReSukiSU&label=Build&logo=github-actions&style=flat-square)](https://github.com/Numbersf/Action-Build/actions/workflows/Build%20Kernel%20OnePlus.yml?query=branch%3AReSukiSU)
+[![Workflow Status](https://img.shields.io/github/actions/workflow/status/Numbersf/Action-Build/Build%20Kernel%20OnePlus.yml?branch=ReSukiSU&label=remote%20build&logo=github-actions&style=flat-square)](https://github.com/Numbersf/Action-Build/actions/workflows/Build%20Kernel%20OnePlus.yml?query=branch%3AReSukiSU) ![Downloads](https://img.shields.io/github/downloads/Numbersf/Action-Build/total)
  
 [![Kernel Manifest](https://img.shields.io/badge/Kernel%20Manifest-EB0029?logo=oneplus&logoColor=white&style=flat-square)](https://github.com/OnePlusOSS/kernel_manifest) [![Dynamic Kernel Manifest](https://img.shields.io/badge/Dynamic%20Kernel%20Manifest-EB0029?logo=oneplus&logoColor=white&style=flat-square)](https://github.com/Numbersf/kernel_manifest) [![Kernel Manifest Appendix](https://img.shields.io/badge/Kernel%20Manifest%20Appendix-EB0029?logo=oneplus&logoColor=white&style=flat-square)](https://github.com/Numbersf/Kernel_Manifest_Appendix) [![Fengchi Kernel](https://img.shields.io/badge/Fengchi%20Kernel-EB0029?logo=github&logoColor=white&style=flat-square)](https://github.com/Numbersf/SCHED_PATCH)
  
@@ -78,7 +78,7 @@
 >
 >如果你开启了``ZRAM``算法,请在刷入``Anykernel3``重启**前**安装``ZRAM``模块,部分参数请自行调整。另外``5.10``内核暂不支持开启``ZRAM``算法,因为没有找到``zram.ko``路径,但是生成的``Anykernel3``依旧可用  
 >
->``MTK``设备不支持开启网络功能拓展,不支持关闭极速构建  
+>``MTK``设备不支持关闭极速构建  
 >
 >``OnePlus Ace5``不支持开启风驰,较老的机型即使内核加入也无法使用,不要勉强  
 >

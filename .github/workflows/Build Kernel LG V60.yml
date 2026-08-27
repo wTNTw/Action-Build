@@ -1,0 +1,461 @@
+name: Build Kernel LG V60
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: '内核源码分支 (Resukisu-LG_V60)'
+        required: true
+        default: lineage-23.2
+        type: choice
+        options:
+          - lineage-23.2
+          - lineage-23.0
+          - lineage-22.2
+      suffix:
+        description: '自定义内核后缀（-1 关闭；留空按时间戳）'
+        required: false
+        default: ''
+        type: string
+      droid_spaces:
+        description: '添加轻量级 Linux 容器支持 (DroidSpaces)？'
+        required: true
+        type: boolean
+        default: true
+      zram:
+        description: 'ZRAM (0关闭/1开启)/算法名/大小'
+        required: true
+        default: '1/lz4/4294967296'
+        type: string
+      kernel_date:
+        description: '按日期回退内核源码 (YYYY-MM-DD，留空最新)'
+        required: false
+        default: ''
+        type: string
+      build_time:
+        description: '自定义构建时间 (F=UTCT 或 -1 关闭)'
+        required: false
+        default: ''
+        type: string
+      ksu_meta:
+        description: '管理器分支名/内置分支名/自定义版本标识/回退分支hash'
+        required: false
+        default: 'main/main//'
+        type: string
+      netfilter:
+        description: '启用网络功能拓展 (NETFILTER)？'
+        required: true
+        type: boolean
+        default: true
+      unicode_bypass:
+        description: '添加 Unicode 不可见字码点漏洞修复补丁？'
+        required: true
+        type: boolean
+        default: true
+      kpm:
+        description: 'KernelPatch (KPM) 支持'
+        required: true
+        type: boolean
+        default: true
+
+
+concurrency:
+  group: lgv60-build-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: LG V60 (${{ inputs.kernel_branch }} KSU${{ inputs.droid_spaces && ' DS' || '' }}${{ inputs.suffix && format(' {0}', inputs.suffix) || '' }})
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime
+      CCACHE_MAXSIZE: 5G
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      KERNEL_REPO: https://github.com/wTNTw/Resukisu-LG_V60.git
+      ANY_KERNEL_REPO: https://github.com/kiy017/AnyKernel3.git
+
+    steps:
+      - name: Checkout Action-Build (this repo)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git curl wget bison flex zip bc cpio libssl-dev ccache python-is-python3
+
+      - name: Download and Extract Android NDK
+        run: |
+          curl -LO https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          unzip -q android-ndk-r27c-linux.zip "android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/*"
+          mkdir -p "$HOME/toolchain"
+          mv android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/* "$HOME/toolchain/"
+          rm -rf android-ndk-r27c-linux.zip android-ndk-r27c
+          echo "$HOME/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Setup ccache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: lgv60-ccache-${{ inputs.kernel_branch }}-${{ github.run_id }}
+          restore-keys: |
+            lgv60-ccache-${{ inputs.kernel_branch }}-
+            lgv60-ccache-
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 --single-branch --branch "${{ inputs.kernel_branch }}" "$KERNEL_REPO" kernel
+          cd kernel
+          git log -1 --format="kernel HEAD: %H %s"
+
+      - name: Rollback Kernel Source by Date
+        if: ${{ inputs.kernel_date != '' }}
+        working-directory: kernel
+        env:
+          KERNEL_DATE: ${{ inputs.kernel_date }}
+        run: |
+          if [[ ! "$KERNEL_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "❌ KERNEL_DATE 格式错误，应为 YYYY-MM-DD"
+            exit 1
+          fi
+          git fetch --unshallow origin 2>/dev/null || echo "⚠️ unshallow 失败，可能无法按日期回退"
+          COMMIT=$(git log --before="${KERNEL_DATE} 23:59:59" -1 --format=%H)
+          if [ -z "$COMMIT" ]; then
+            echo "❌ 未找到 ${KERNEL_DATE} 前的 commit"
+            exit 1
+          fi
+          git checkout -q "$COMMIT"
+          git log -1 --format="kernel HEAD: %H %s"
+
+      - name: Apply UNICODE_BYPASS
+        if: inputs.unicode_bypass == true
+        working-directory: kernel
+        run: |
+          PATCH="${{ github.workspace }}/patches/unicode_bypass_fix_6.1-.patch"
+          if [ -f "$PATCH" ]; then
+            patch -p1 --forward < "$PATCH" || echo "⚠️ patch 应用失败（可能已应用），继续"
+            echo "UNICODE_BYPASS applied"
+          else
+            echo "⚠️ 未找到 unicode_bypass_fix_6.1-.patch，跳过"
+          fi
+
+      - name: Inject ReSukiSU (KernelSU via KSU_META)
+        working-directory: kernel
+        run: |
+          KSU_META="${{ inputs.ksu_meta }}"
+          IFS='/' read -r KSU_MANAGER_BRANCH KSU_BUILTIN_BRANCH KSU_CUSTOM_TAG MANUAL_HASH <<< "$KSU_META"
+          echo "manager branch: ${KSU_MANAGER_BRANCH:-main}, builtin branch: ${KSU_BUILTIN_BRANCH:-main}"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${KSU_MANAGER_BRANCH:-main}/kernel/setup.sh" | bash -s "${KSU_BUILTIN_BRANCH:-main}"
+          if [ -n "$MANUAL_HASH" ]; then
+            cd KernelSU
+            if git checkout "$MANUAL_HASH" 2>/dev/null; then
+              echo "KSU 回退到 $MANUAL_HASH"
+            else
+              echo "⚠️ 无法 checkout $MANUAL_HASH，保持当前版本"
+            fi
+            cd ..
+          fi
+          if [ -n "$KSU_CUSTOM_TAG" ]; then
+            echo "custom version tag: $KSU_CUSTOM_TAG"
+          fi
+
+      - name: Configure Kernel
+        working-directory: kernel
+        env:
+          KSU_ENABLE: 'true'
+          SUSFS_ENABLE: 'true'
+          DROID_SPACES: ${{ inputs.droid_spaces }}
+          NETFILTER: ${{ inputs.netfilter }}
+          ZRAM: ${{ inputs.zram }}
+        run: |
+          make ARCH=arm64 O=out timelm_defconfig
+
+          if [ "$KSU_ENABLE" == "true" ]; then
+            scripts/config --file out/.config \
+              -e KSU \
+              -e THREAD_INFO_IN_TASK \
+              -e KPM \
+              -e TMPFS_XATTR \
+              -e TMPFS_POSIX_ACL
+            if [ "$SUSFS_ENABLE" == "true" ]; then
+              scripts/config --file out/.config \
+                -e KSU_SUSFS \
+                -e KSU_SUSFS_SUS_PATH \
+                -e KSU_SUSFS_SUS_MOUNT \
+                -e KSU_SUSFS_SUS_KSTAT \
+                -e KSU_SUSFS_SUS_KSTAT_REDIRECT \
+                -e KSU_SUSFS_SPOOF_UNAME \
+                -e KSU_SUSFS_ENABLE_LOG \
+                -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+                -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+                -e KSU_SUSFS_OPEN_REDIRECT \
+                -e KSU_SUSFS_SUS_MAP \
+                -e KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT \
+                -e KSU_MULTI_MANAGER_SUPPORT \
+                -e KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+            fi
+          fi
+
+
+          if [ "$DROID_SPACES" == "true" ]; then
+            # 轻量 Linux 容器支持（4.19 可用项；CONFIG_NTSYNC 仅 5.10+ 无 Kconfig）
+            scripts/config --file out/.config \
+              -e SYSVIPC \
+              -e DEVTMPFS \
+              -e PID_NS \
+              -e IPC_NS \
+              -e USER_NS \
+              -e NAMESPACES \
+              -e POSIX_MQUEUE \
+              -e NETFILTER_XT_TARGET_REJECT \
+              -e NETFILTER_XT_TARGET_LOG \
+              -e NETFILTER_XT_MATCH_RECENT
+          fi
+
+          if [ "$NETFILTER" == "true" ]; then
+            scripts/config --file out/.config \
+              -e NETFILTER_XT_MATCH_ADDRTYPE \
+              -e NETFILTER_XT_SET \
+              -e IP_SET \
+              -e IP_SET_MAX \
+              -e IP_SET_BITMAP_IP \
+              -e IP_SET_BITMAP_IPMAC \
+              -e IP_SET_BITMAP_PORT \
+              -e IP_SET_HASH_IP \
+              -e IP_SET_HASH_IPMARK \
+              -e IP_SET_HASH_IPPORT \
+              -e IP_SET_HASH_IPPORTIP \
+              -e IP_SET_HASH_IPPORTNET \
+              -e IP_SET_HASH_IPMAC \
+              -e IP_SET_HASH_MAC \
+              -e IP_SET_HASH_NETPORTNET \
+              -e IP_SET_HASH_NET \
+              -e IP_SET_HASH_NETNET \
+              -e IP_SET_HASH_NETPORT \
+              -e IP_SET_HASH_NETIFACE \
+              -e IP_SET_LIST_SET \
+              -e IP6_NF_NAT \
+              -e IP6_NF_TARGET_MASQUERADE \
+              -e NETFILTER_XT_TARGET_HL \
+              -e IP_NF_TARGET_TTL \
+              -e IP6_NF_TARGET_HL \
+              -e NETFILTER_XT_MATCH_HL \
+              -e IP_NF_MATCH_TTL \
+              -e IP6_NF_MATCH_HL \
+              -e IP_NF_MANGLE \
+              -e IP6_NF_MANGLE
+            scripts/config --file out/.config --set-val IP_SET_MAX 65534
+          fi
+
+          if [ -n "$ZRAM" ]; then
+            IFS='/' read -r ZRAM_SW ZRAM_ALGO ZRAM_SIZE <<< "$ZRAM"
+            if [ "$ZRAM_SW" == "1" ]; then
+              echo "ZRAM enabled (algo=$ZRAM_ALGO size=$ZRAM_SIZE)"
+              scripts/config --file out/.config \
+                -e ZRAM \
+                -e ZRAM_WRITEBACK \
+                -e ZRAM_MEMORY_TRACKING \
+                -e CRYPTO_LZ4 \
+                -e CRYPTO_LZ4HC \
+                -e CRYPTO_LZO \
+                -e CRYPTO_ZSTD
+            fi
+          fi
+
+          grep -E "CONFIG_KSU|CONFIG_KSU_SUSFS|CONFIG_KPM|CONFIG_ZRAM|CONFIG_USER_NS|CONFIG_NAMESPACES|CONFIG_IP_SET|CONFIG_NETFILTER_XT_MATCH_ADDRTYPE" out/.config
+
+      - name: Build Kernel
+        working-directory: kernel
+        env:
+          BUILD_TIME: ${{ inputs.build_time }}
+        run: |
+          export KBUILD_BUILD_USER=kiyomi
+          export KBUILD_BUILD_HOST=yuki
+          if [ -n "$BUILD_TIME" ] && [ "$BUILD_TIME" != "-1" ]; then
+            if [ "$BUILD_TIME" = "F" ]; then
+              export KBUILD_BUILD_TIMESTAMP=$(date -u +"%a %b %e %H:%M:%S UTC %Y")
+            else
+              export KBUILD_BUILD_TIMESTAMP="$BUILD_TIME"
+            fi
+            echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP"
+          fi
+          make -j$(nproc) \
+            ARCH=arm64 SUBARCH=arm64 O=out \
+            CC=clang HOSTCC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+
+          test -f out/arch/arm64/boot/Image && echo "Image OK" || { echo "Image missing"; exit 1; }
+
+      - name: Patch Kernel For KPM Support
+        if: inputs.kpm == true
+        working-directory: kernel/out/arch/arm64/boot
+        run: |
+          wget https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
+          chmod +x patch_linux
+          ./patch_linux
+          rm -f Image
+          mv oImage Image
+          echo "KPM patch applied"
+
+      - name: Generate Image-dtb and Collect Modules
+        working-directory: kernel
+        run: |
+          # Image-dtb
+          if [ ! -f "out/arch/arm64/boot/Image.gz" ] && [ -f "out/arch/arm64/boot/Image" ]; then
+            cat out/arch/arm64/boot/Image $(find out/arch/arm64/boot/dts/ -name "*.dtb") > out/arch/arm64/boot/Image-dtb
+            echo "Image-dtb generated"
+          fi
+
+          # dtb aggregate
+          find out/arch/arm64/boot/dts -name '*.dtb' -exec cat {} + > out/arch/arm64/boot/dtb
+
+          # Modules 平铺整理（对齐原 build.sh 行为）
+          if grep -q "CONFIG_MODULES=y" "out/.config"; then
+            MODULES_OUT="$(pwd)/out/modules_out"
+            rm -rf "$MODULES_OUT"
+            make -j$(nproc) ARCH=arm64 SUBARCH=arm64 O=out \
+              CC=clang HOSTCC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+              LD=ld.lld AR=llvm-ar NM=llvm-nm \
+              OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+              INSTALL_MOD_PATH="$MODULES_OUT" modules_install
+
+            TARGET_KV_DIR=$(find "$MODULES_OUT/lib/modules" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            FLAT_STAGE="$MODULES_OUT/flat_modules"
+            mkdir -p "$FLAT_STAGE"
+
+            # 音频模块
+            find "$TARGET_KV_DIR/kernel/techpack/audio" -name "*.ko" 2>/dev/null | while read -r audio_mod; do
+              base_name=$(basename "$audio_mod" ".ko")
+              if [ "$base_name" = "machine_dlkm" ]; then
+                cp "$audio_mod" "$FLAT_STAGE/audio_machine_kona.ko"
+              else
+                clean_name=$(echo "$base_name" | sed 's/_dlkm//')
+                cp "$audio_mod" "$FLAT_STAGE/audio_${clean_name}.ko"
+              fi
+            done
+
+            # WiFi 模块
+            if [ -f "$TARGET_KV_DIR/kernel/drivers/staging/qcacld-3.0/wlan.ko" ]; then
+              cp "$TARGET_KV_DIR/kernel/drivers/staging/qcacld-3.0/wlan.ko" "$FLAT_STAGE/qca_cld3_qca6390.ko"
+            fi
+
+            # 其余模块（含 zram.ko 等）
+            find "$TARGET_KV_DIR/kernel" -name "*.ko" ! -path "*qcacld-3.0*" ! -path "*techpack/audio*" | while read -r misc_mod; do
+              cp "$misc_mod" "$FLAT_STAGE/$(basename "$misc_mod")"
+            done
+
+            rm -rf "$TARGET_KV_DIR/kernel"
+            rm -f "$TARGET_KV_DIR"/source "$TARGET_KV_DIR"/build
+            mv "$FLAT_STAGE"/* "$TARGET_KV_DIR/"
+            rm -rf "$FLAT_STAGE"
+            find "$TARGET_KV_DIR" -name "*.ko" -type f -exec chmod 644 {} +
+
+            cp "${{ github.workspace }}/modules.dep.static" "$TARGET_KV_DIR/modules.dep"
+            touch "$TARGET_KV_DIR/modules.alias" "$TARGET_KV_DIR/modules.softdep"
+            echo "MODULES_DIR=$TARGET_KV_DIR" >> "$GITHUB_ENV"
+          fi
+
+      - name: Pack AnyKernel3
+        run: |
+          git clone "$ANY_KERNEL_REPO" -b master --single-branch --depth=1 anykernel
+          cp kernel/out/arch/arm64/boot/Image-dtb anykernel/
+          cp kernel/out/arch/arm64/boot/dtb anykernel/
+          if [ -n "$MODULES_DIR" ] && [ -d "$MODULES_DIR" ]; then
+            cp -r "$MODULES_DIR"/* anykernel/modules/vendor/lib/modules/
+            chmod 644 anykernel/modules/vendor/lib/modules/*
+          fi
+
+          KSU_STR="ReSukiSU-SuSFS"
+          FLAGS=""
+          [ "${{ inputs.droid_spaces }}" == "true" ] && FLAGS="${FLAGS}_DS"
+          SUFFIX_PART=""
+          if [ -n "${{ inputs.suffix }}" ] && [ "${{ inputs.suffix }}" != "-1" ]; then
+            SUFFIX_PART="_${{ inputs.suffix }}"
+          fi
+          ZIP_FILENAME="resukisu_timelm_${KSU_STR}${FLAGS}${SUFFIX_PART}_$(date +'%Y%m%d_%H%M%S')_anykernel3.zip"
+
+          cd anykernel
+          zip -r9 "$ZIP_FILENAME" ./* -x .git .gitignore out/ ./*.zip
+          mv "$ZIP_FILENAME" ..
+          cd ..
+          echo "ZIP_FILE=$ZIP_FILENAME" >> "$GITHUB_ENV"
+          echo "zip: $ZIP_FILENAME"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.ZIP_FILE }}
+          path: ${{ env.ZIP_FILE }}
+          if-no-files-found: error
+
+      - name: Publish to Telegram
+        if: ${{ always() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ZIP_FILE: ${{ env.ZIP_FILE }}
+          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          KSU_ENABLED: 'true'
+          SUSFS_ENABLED: 'true'
+          KPM_ENABLED: ${{ inputs.kpm }}
+          ZRAM: ${{ inputs.zram }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM secrets not set. Skipping."
+            exit 0
+          fi
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "zip not found: $ZIP_FILE"
+            exit 0
+          fi
+
+          escape_mdv2() {
+            printf '%s' "$1" | perl -pe 's{([_*\[\]()~`>#+=|{}.!-])}{\\$1}g'
+          }
+
+          ESC_FILE=$(escape_mdv2 "${ZIP_FILE}")
+          ESC_BRANCH=$(escape_mdv2 "${KERNEL_BRANCH}")
+          ESC_KSU=$(escape_mdv2 "${KSU_ENABLED}")
+          ESC_SUSFS=$(escape_mdv2 "${SUSFS_ENABLED}")
+          ESC_KPM=$(escape_mdv2 "${KPM_ENABLED}")
+          ESC_ZRAM=$(escape_mdv2 "${ZRAM}")
+          ESC_URL=$(escape_mdv2 "${RUN_URL}")
+
+          CAPTION=$(cat <<EOF
+          *Resukisu Kernel — LG V60 (timelm)*
+          *Branch:* \`${ESC_BRANCH}\`
+          *KSU:* \`${ESC_KSU}\`  *SUSFS:* \`${ESC_SUSFS}\`  *KPM:* \`${ESC_KPM}\`
+          *ZRAM:* \`${ESC_ZRAM}\`
+          *Zip:* \`${ESC_FILE}\`
+          🔗 [Actions run](${ESC_URL})
+
+          ⚠️ 刷入前请备份 boot 分区。
+          EOF
+          )
+
+          http_code=$(curl -s -o /tmp/tg_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F document=@"${ZIP_FILE}" \
+            --form-string "caption=${CAPTION}" \
+            -F "parse_mode=MarkdownV2")
+
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            echo "Telegram upload OK"
+          else
+            echo "Telegram upload failed: HTTP $http_code"
+            sed -n '1,200p' /tmp/tg_resp.txt || true
+          fi

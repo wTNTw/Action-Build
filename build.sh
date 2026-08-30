@@ -388,37 +388,8 @@ EOF
 fi
 
 # ------------- Attach ReSukiSU Manager APK to AnyKernel3 -------------
-if [ $KSU_ENABLE -eq 1 ]; then
-    echo "Attaching latest ReSukiSU manager APK..."
-    MANAGER_RUN_ID=""
-    
-    if command -v gh >/dev/null 2>&1; then
-        MANAGER_RUN_ID=$(gh api "repos/ReSukiSU/ReSukiSU/actions/workflows/build-manager.yml/runs?branch=main&status=success&event=push&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "")
-    fi
-    
-    if [ -n "$MANAGER_RUN_ID" ]; then
-        MANAGER_ARTIFACT_URL=$(gh api "repos/ReSukiSU/ReSukiSU/actions/runs/$MANAGER_RUN_ID/artifacts" 2>/dev/null | jq -r '.artifacts[] | select(.name == "Manager-release") | .archive_download_url' 2>/dev/null | head -n1)
-        
-        if [ -n "$MANAGER_ARTIFACT_URL" ]; then
-            echo "Downloading Manager-release artifact from run $MANAGER_RUN_ID..."
-            if curl -fL -H "Authorization: token ${GITHUB_TOKEN}" -o /tmp/Manager-release.zip "$MANAGER_ARTIFACT_URL" 2>/dev/null; then
-                if unzip -l /tmp/Manager-release.zip 2>/dev/null | grep -q "arm64-v8a.*\.apk"; then
-                    unzip -j /tmp/Manager-release.zip "*arm64-v8a*.apk" -d anykernel/ 2>/dev/null || echo "WARN: arm64 APK extraction failed."
-                else
-                    unzip -j /tmp/Manager-release.zip "*.apk" -d anykernel/ 2>/dev/null || echo "WARN: generic APK extraction failed."
-                fi
-                rm -f /tmp/Manager-release.zip
-                echo "ReSukiSU manager APK attached to AnyKernel3."
-            else
-                echo "WARN: APK download failed, continuing without APK."
-            fi
-        else
-            echo "WARN: No Manager-release artifact found, continuing without APK."
-        fi
-    else
-        echo "WARN: Could not resolve ReSukiSU manager build run, continuing without APK."
-    fi
-fi
+# Manager APK will be downloaded by GitHub Actions workflow
+# Skip this step in build.sh to avoid hanging
 
 cp out/arch/arm64/boot/Image-dtb anykernel/
 cp out/arch/arm64/boot/dtb anykernel/

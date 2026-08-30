@@ -146,6 +146,57 @@ jobs:
             bash build.sh ${{ inputs.device }}
           fi
       
+      - name: Download ReSukiSU Manager APK
+        if: ${{ inputs.ksu }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Downloading ReSukiSU Manager APK ==="
+          
+          MANAGER_BRANCH="main"
+          MANAGER_ARTIFACT="Manager-release"
+          
+          echo "Querying latest successful build on branch: $MANAGER_BRANCH"
+          run_id=$(gh api "repos/ReSukiSU/ReSukiSU/actions/workflows/build-manager.yml/runs?branch=$MANAGER_BRANCH&status=success&event=push&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "")
+          
+          if [[ -z "$run_id" ]]; then
+            echo "WARN: No successful workflow run found. Skipping APK download."
+            exit 0
+          fi
+          
+          echo "Found run ID: $run_id"
+          artifact_url=$(gh api "repos/ReSukiSU/ReSukiSU/actions/runs/$run_id/artifacts" 2>/dev/null | jq -r ".artifacts[] | select(.name == \"$MANAGER_ARTIFACT\") | .archive_download_url" | head -n1)
+          
+          if [[ -z "$artifact_url" ]]; then
+            echo "WARN: No artifact '$MANAGER_ARTIFACT' found in run $run_id. Skipping."
+            exit 0
+          fi
+          
+          echo "Downloading artifact from: $artifact_url"
+          if curl -fL -H "Authorization: token $GITHUB_TOKEN" -o "${MANAGER_ARTIFACT}.zip" "$artifact_url" 2>/dev/null; then
+            echo "Extracting APK..."
+            
+            if unzip -l "${MANAGER_ARTIFACT}.zip" 2>/dev/null | grep -q "arm64-v8a.*\.apk"; then
+              echo "Found arm64-v8a APK"
+              unzip -j "${MANAGER_ARTIFACT}.zip" "*arm64-v8a*.apk" -d ./anykernel/ 2>/dev/null
+            else
+              echo "Extracting generic APK"
+              unzip -j "${MANAGER_ARTIFACT}.zip" "*.apk" -d ./anykernel/ 2>/dev/null
+            fi
+            
+            rm -f "${MANAGER_ARTIFACT}.zip"
+            
+            if ls ./anykernel/*.apk 1> /dev/null 2>&1; then
+              echo "✓ ReSukiSU Manager APK downloaded successfully"
+              ls -lh ./anykernel/*.apk
+            else
+              echo "WARN: APK extraction failed"
+            fi
+          else
+            echo "WARN: Download failed. Continuing without APK."
+          fi
+      
       - name: Prepare Artifact Content
         run: |
           rm -rf anykernel/.git

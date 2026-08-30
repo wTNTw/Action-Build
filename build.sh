@@ -391,10 +391,12 @@ fi
 # Manager APK will be downloaded by GitHub Actions workflow
 # Skip this step in build.sh to avoid hanging
 
-cp out/arch/arm64/boot/Image-dtb anykernel/
-cp out/arch/arm64/boot/dtb anykernel/
+echo "Copying kernel image and dtb..."
+cp out/arch/arm64/boot/Image-dtb anykernel/ || { echo "ERROR: Failed to copy Image-dtb"; exit 1; }
+cp out/arch/arm64/boot/dtb anykernel/ || { echo "ERROR: Failed to copy dtb"; exit 1; }
+echo "Kernel image and dtb copied successfully"
 
-cd anykernel
+cd anykernel || { echo "ERROR: Failed to cd into anykernel"; exit 1; }
 
 # Handle custom suffix
 if [ -n "${SUFFIX}" ]; then
@@ -406,14 +408,19 @@ if [ -n "${SUFFIX}" ]; then
         CUSTOM_SUFFIX="_${SUFFIX}"
     fi
 else
-    # Generate random suffix
-    RANDOM_STR=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 8 | head -n 1)
+    # Generate random suffix (fixed: use dd instead of cat to avoid hanging)
+    RANDOM_STR=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c 8)
     CUSTOM_SUFFIX="_${RANDOM_STR}"
 fi
 
 ZIP_FILENAME=kiyo_${TARGET_DEVICE}_${KSU_ZIP_STR}${CUSTOM_SUFFIX}_$(date +'%Y%m%d_%H%M%S')_anykernel3.zip
-zip -r9 $ZIP_FILENAME ./* -x .git .gitignore out/ ./*.zip
-mv $ZIP_FILENAME ../
+
+echo "Creating AnyKernel3 flashable zip: $ZIP_FILENAME"
+echo "Compressing files..."
+zip -r9 $ZIP_FILENAME ./* -x .git .gitignore out/ ./*.zip || { echo "ERROR: Failed to create zip file"; exit 1; }
+echo "Zip created successfully"
+
+mv $ZIP_FILENAME ../ || { echo "ERROR: Failed to move zip file"; exit 1; }
 
 cd ..
 

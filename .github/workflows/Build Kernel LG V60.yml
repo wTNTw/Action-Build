@@ -1,8 +1,18 @@
-name: Build Kernel
+name: Build Kernel LG V60
 
 on:
   workflow_dispatch:
     inputs:
+      kernel_repo:
+        description: 'Kernel Source Repository'
+        required: true
+        default: 'wTNTw/Resukisu-LG_V60'
+        type: string
+      kernel_branch:
+        description: 'Kernel Source Branch'
+        required: true
+        default: 'lineage-23.2'
+        type: string
       device:
         description: 'Target Device Codename'
         required: true
@@ -11,13 +21,6 @@ on:
         options:
           - timelm
           - nethunter
-      script:
-        description: 'Select Build Script'
-        required: true
-        default: 'build.sh'
-        type: choice
-        options:
-          - build.sh
       ksu:
         description: 'Enable KernelSU (ReSukiSU-SuSFS)'
         required: true
@@ -65,14 +68,23 @@ on:
 
 jobs:
   build:
-    name: Build Kernel for ${{ inputs.device }} (${{ inputs.script }}) (${{ inputs.ksu && 'KSU' || 'NoKSU' }})
+    name: Build Kernel for ${{ inputs.device }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Source
+      - name: Checkout Kernel Source
         uses: actions/checkout@v6
         with:
+          repository: ${{ inputs.kernel_repo }}
+          ref: ${{ inputs.kernel_branch }}
           fetch-depth: 1
+      
+      - name: Download Build Script
+        run: |
+          curl -LO https://raw.githubusercontent.com/wTNTw/Action-Build/ReSukiSU/build.sh
+          chmod +x build.sh
+          echo "=== Downloaded build.sh ==="
+          ls -lh build.sh
       
       - name: Cleanup Disk Space
         run: |
@@ -122,14 +134,16 @@ jobs:
           CCM: ${{ inputs.ccm }}
           DROID_SPACES: ${{ inputs.droid_spaces }}
         run: |
-          chmod +x build.sh
-          echo "Using script: ${{ inputs.script }}"
+          echo "=== Kernel Source Verification ==="
+          ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"
+          
+          echo "=== Building Kernel ==="
           if [ "${{ inputs.ksu }}" == "true" ]; then
             echo "Building with KernelSU..."
-            bash ${{ inputs.script }} ${{ inputs.device }} ksu
+            bash build.sh ${{ inputs.device }} ksu
           else
             echo "Building without KernelSU..."
-            bash ${{ inputs.script }} ${{ inputs.device }}
+            bash build.sh ${{ inputs.device }}
           fi
       
       - name: Prepare Artifact Content

@@ -1,0 +1,146 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Target Device Codename'
+        required: true
+        default: 'timelm'
+        type: choice
+        options:
+          - timelm
+          - nethunter
+      script:
+        description: 'Select Build Script'
+        required: true
+        default: 'build.sh'
+        type: choice
+        options:
+          - build.sh
+      ksu:
+        description: 'Enable KernelSU (ReSukiSU-SuSFS)'
+        required: true
+        type: boolean
+        default: true
+      kpm:
+        description: 'Kernel Module Implementation (KPM/KPN/N/A)'
+        required: true
+        type: choice
+        default: 'KPM'
+        options:
+          - KPM
+          - KPN
+          - N/A
+      re_kernel:
+        description: 'Enable Re:Kernel?'
+        required: true
+        type: boolean
+        default: true
+      netfilter:
+        description: 'Enable Network Extensions (NETFILTER)?'
+        required: true
+        type: boolean
+        default: true
+      build_time:
+        description: 'Custom Build Time (F=UTCT or -1=disable)'
+        required: false
+        type: string
+        default: ''
+      suffix:
+        description: 'Custom Kernel Suffix (empty=random or -1=disable)'
+        required: false
+        type: string
+        default: ''
+      ccm:
+        description: 'Enable Network Congestion Control (BBRv1+ECN)?'
+        required: true
+        type: boolean
+        default: false
+      droid_spaces:
+        description: 'Enable Lightweight Linux Container Support (DroidSpaces)?'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build Kernel for ${{ inputs.device }} (${{ inputs.script }}) (${{ inputs.ksu && 'KSU' || 'NoKSU' }})
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      
+      - name: Cleanup Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git curl wget bison flex zip bc cpio libssl-dev ccache python-is-python3
+      
+      - name: Setup Cache (ccache)
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache_mikernel
+          key: kernel-ccache-ecs-${{ inputs.device }}-${{ inputs.script }}-${{ github.run_id }}
+          restore-keys: |
+            kernel-ccache-ecs-${{ inputs.device }}-${{ inputs.script }}-
+            kernel-ccache-ecs-${{ inputs.device }}-
+            kernel-ccache-ecs-
+      
+      - name: Download and Extract Android NDK
+        run: |
+          curl -LO https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          unzip -q android-ndk-r27c-linux.zip "android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/*"
+          mkdir -p $HOME/toolchain
+          mv android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/* $HOME/toolchain/
+          rm -rf android-ndk-r27c-linux.zip android-ndk-r27c
+      
+      - name: Install ccache-ECS
+        run: |
+          curl -L -o /tmp/ccache-ecs.zip https://github.com/cctv18/ccache-ECS/releases/download/ccache-ECS-v1.0/linux-x86_64-musl-static-binary.zip
+          unzip -o /tmp/ccache-ecs.zip -d /tmp/ccache-ecs
+          sudo install -m 755 /tmp/ccache-ecs/ccache /usr/bin/ccache
+          echo "=== ccache (ECS) version ==="
+          ccache --version
+      
+      - name: Build Kernel
+        env:
+          KPM_OPTION: ${{ inputs.kpm }}
+          RE_KERNEL: ${{ inputs.re_kernel }}
+          NETFILTER: ${{ inputs.netfilter }}
+          BUILD_TIME: ${{ inputs.build_time }}
+          SUFFIX: ${{ inputs.suffix }}
+          CCM: ${{ inputs.ccm }}
+          DROID_SPACES: ${{ inputs.droid_spaces }}
+        run: |
+          chmod +x build.sh
+          echo "Using script: ${{ inputs.script }}"
+          if [ "${{ inputs.ksu }}" == "true" ]; then
+            echo "Building with KernelSU..."
+            bash ${{ inputs.script }} ${{ inputs.device }} ksu
+          else
+            echo "Building without KernelSU..."
+            bash ${{ inputs.script }} ${{ inputs.device }}
+          fi
+      
+      - name: Prepare Artifact Content
+        run: |
+          rm -rf anykernel/.git
+          echo "=== Artifact content ==="
+          ls -la anykernel/
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: AnyKernel3_${{ inputs.ksu && format('ReSukiSU_{0}', env.KSUVER) || 'NoKernelSU' }}_LG_V60
+          path: anykernel/*
+          if-no-files-found: error

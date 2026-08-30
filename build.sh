@@ -215,13 +215,13 @@ if [ "$CCM_ENABLE" = "true" ]; then
     scripts/config --file out/.config \
         -e TCP_CONG_ADVANCED \
         -e TCP_CONG_BBR \
-        -e DEFAULT_BBR \
-        --set-str DEFAULT_TCP_CONG "bbr" \
         -e TCP_CONG_CUBIC \
         -e TCP_CONG_WESTWOOD \
         -e TCP_CONG_HTCP \
         -e NET_SCH_FQ \
-        -e NET_SCH_FQ_CODEL
+        -e NET_SCH_FQ_CODEL \
+        -e DEFAULT_BBR \
+        --set-str DEFAULT_TCP_CONG "bbr"
     echo "CCM enabled: BBRv1 congestion control with FQ qdisc"
 else
     echo "CCM disabled, using default CUBIC"

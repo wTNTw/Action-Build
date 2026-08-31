@@ -182,6 +182,11 @@ on:
         description: "是否停用此次缓存？//Disable caching for this build?"
         required: true
         default: false
+      TRIGGER_LGV60:
+        type: boolean
+        description: "构建完成后是否触发 LG V60 工作流？//Trigger LG V60 workflow after build?"
+        required: true
+        default: true
 
 jobs:
   build:
@@ -1886,6 +1891,23 @@ jobs:
             echo "❌ Telegram 发送失败，HTTP code: $http_code"
             sed -n '1,200p' /tmp/telegram_resp.txt || true
           fi
+
+      - name: Trigger LG V60 Workflow
+        if: ${{ github.event.inputs.TRIGGER_LGV60 == 'true' && success() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Triggering LG V60 kernel build workflow ==="
+          gh workflow run "Build Kernel LG V60.yml" --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
+            -f kernel_repo="wTNTw/Resukisu-LG_V60" \
+            -f kernel_branch="lineage-23.2" \
+            -f device="timelm" \
+            -f ksu=true \
+            -f kpm=KPM \
+            -f re_kernel=true \
+            -f netfilter=true \
+            -f ccm=true
+          echo "✅ LG V60 workflow triggered successfully"
 
       - name: Check Cache Size Before Save
         if: ${{ github.event.inputs.BUILD_NOCACHE == 'false' }}

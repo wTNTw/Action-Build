@@ -257,7 +257,7 @@ jobs:
           ESC_BRANCH=$(escape_mdv2 "${BRANCH}")
 
           MESSAGE=$(cat <<EOF
-          *ReSukiSU — LG V60* (${ESC_BRANCH})
+          *ReSukiSU — LG V60* \\(${ESC_BRANCH}\\)
           *Device:* \`${ESC_DEVICE}\`
           *KSU version:* \`${ESC_KSU}\`
           *Build Date:* \`${ESC_DATE}\`

@@ -56,12 +56,7 @@ on:
         type: string
         default: ''
       ccm:
-        description: 'Enable Network Congestion Control (BBRv1+ECN)?'
-        required: true
-        type: boolean
-        default: false
-      droid_spaces:
-        description: 'Enable Lightweight Linux Container Support (DroidSpaces)?'
+        description: 'Enable Network Congestion Control (BBRv1+ECN)? (SAFE)'
         required: true
         type: boolean
         default: false
@@ -132,7 +127,6 @@ jobs:
           BUILD_TIME: ${{ inputs.build_time }}
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
-          DROID_SPACES: ${{ inputs.droid_spaces }}
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"

@@ -109,7 +109,6 @@ KPM_OPTION=${KPM_OPTION:-KPM}
 RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
-DROID_SPACES_ENABLE=${DROID_SPACES:-false}
 
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
@@ -123,7 +122,6 @@ echo "KPM_OPTION: $KPM_OPTION"
 echo "RE_KERNEL: $RE_KERNEL_ENABLE"
 echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
-echo "DROID_SPACES: $DROID_SPACES_ENABLE"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -227,24 +225,12 @@ else
     echo "CCM disabled, using default CUBIC"
 fi
 
-# Handle DroidSpaces (Lightweight Linux Container Support)
-if [ "$DROID_SPACES_ENABLE" = "true" ]; then
-    echo "Enabling DroidSpaces (Linux containers)..."
-    scripts/config --file out/.config \
-        -e USER_NS \
-        -e CGROUP_DEVICE \
-        -e CGROUP_PIDS \
-        -e CGROUP_FREEZER \
-        -e NET_NS \
-        -e PID_NS \
-        -e IPC_NS \
-        -e UTS_NS \
-        -e OVERLAY_FS
-    echo "DroidSpaces enabled: USER_NS and container features configured"
-    echo "WARNING: USER_NS may affect SELinux behavior, please test thoroughly"
-else
-    echo "DroidSpaces disabled"
-fi
+# DROID_SPACES is DISABLED permanently
+# CONFIRMED: DROID_SPACES breaks vendor WiFi/audio drivers
+# Enabling it injects CONFIG_USER_NS, CONFIG_CGROUP_DEVICE, etc.
+# These configs change kernel ABI and break vendor module compatibility
+# DO NOT re-enable without thorough device testing!
+echo "NOTE: DROID_SPACES feature is permanently disabled (breaks WiFi/audio drivers)"
 
 make $MAKE_ARGS -j$(nproc)
 

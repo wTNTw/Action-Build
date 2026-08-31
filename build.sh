@@ -108,7 +108,7 @@ clang --version
 KPM_OPTION=${KPM_OPTION:-KPM}
 RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
-CCM_ENABLE=${CCM:-true}
+CCM_ENABLE=${CCM:-false}
 
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
@@ -231,103 +231,6 @@ fi
 # These configs change kernel ABI and break vendor module compatibility
 # DO NOT re-enable without thorough device testing!
 echo "NOTE: DROID_SPACES feature is permanently disabled (breaks WiFi/audio drivers)"
-
-# Handle IPv6 NAT / Redirect support (ENABLED BY DEFAULT)
-# Enables IPv6 NAT table, MASQUERADE, REDIRECT, DNAT/SNAT, NPT
-echo "Enabling IPv6 NAT/Redirect support..."
-scripts/config --file out/.config \
-    -e IP6_NF_NAT \
-    -e NF_NAT_MASQUERADE_IPV6 \
-    -e IP6_NF_TARGET_MASQUERADE \
-    -e IP6_NF_TARGET_REDIRECT \
-    -e IP6_NF_TARGET_NPT \
-    -e NF_TABLES_IPV6 \
-    -e NFT_NAT_IPV6
-echo "IPv6 NAT enabled: MASQUERADE, REDIRECT, DNAT/SNAT, NPT"
-
-# Handle Kernel Tuning / Performance optimizations (ENABLED BY DEFAULT)
-echo "Applying kernel performance optimizations..."
-
-# Network optimizations
-scripts/config --file out/.config \
-    -e TCP_CONG_ADVANCED \
-    -e TCP_CONG_BBR \
-    -e TCP_CONG_WESTWOOD \
-    -e TCP_CONG_HTCP \
-    -e TCP_CONG_CDG \
-    -e TCP_CONG_YEAH \
-    -e TCP_CONG_ILLINOIS \
-    -e TCP_CONG_SCALABLE \
-    -e TCP_CONG_VENO \
-    -e TCP_CONG_LP \
-    -e TCP_CONG_DCTCP \
-    -e TCP_CONG_HYBLA \
-    -e TCP_CONG_BIC \
-    -e TCP_CONG_VEGAS \
-    -e TCP_ADVANCED \
-    -e NET_SCH_FQ \
-    -e NET_SCH_FQ_CODEL \
-    -e NET_SCH_CAKE \
-    -e NET_SCH_QFQ \
-    -e NET_SCH_DRR \
-    -e NET_SCH_TBF \
-    -e NET_SCH_HTB \
-    -e NET_SCH_PIE \
-    -e NET_SCH_GRED \
-    -e NET_SCH_SFB \
-    -e NET_SCH_SFQ \
-    -e NET_SCH_RED \
-    -e NET_SCH_INGRESS \
-    -e NET_CLS_U32 \
-    -e NET_CLS_FLOW \
-    -e NET_CLS_FW \
-    -e NET_CLS_BASIC \
-    -e NET_CLS_FQ \
-    -e NET_ACT_POLICE \
-    -e NET_ACT_GACT \
-    -e NET_ACT_MIRRED \
-    -e NET_ACT_IPT \
-    -e NET_ACT_CTINFO \
-    -e NET_ACT_CT \
-    -e NET_ACT_NAT \
-    -e NET_ACT_SIMP \
-    -e NET_ACT_SKBEDIT \
-    -e NET_ACT_CSUM \
-    -e NET_ACT_PEDIT \
-    -e NET_ACT_VLAN \
-    -e NET_ACT_CONNMARK \
-    -e NET_ACT_MARK \
-    -e NET_ACT_TUNNEL_KEY \
-    -e NET_SWITCHDEV \
-    -e NET_CLS_ACT
-
-# TCP socket buffer tuning
-scripts/config --file out/.config \
-    --set-str DEFAULT_TCP_CONG "bbr" \
-    -e DEFAULT_BBR \
-    -e DEFAULT_FQ \
-    -e DEFAULT_FQ_CODEL
-
-# Memory / scheduler optimizations
-scripts/config --file out/.config \
-    -e CFS_BANDWIDTH \
-    -e SCHED_AUTOGROUP \
-    -e SCHED_DEBUG \
-    -e SCHEDSTATS \
-    -e MEMCG \
-    -e MEMCG_SWAP \
-    -e MEMCG_KMEM \
-    -e MEMCG_SWAP_ENABLED \
-    -e KSM \
-    -e CLEANCACHE \
-    -e ZPOOL \
-    -e ZBUD \
-    -e ZSMALLOC \
-    -e ZRAM \
-    -e ZRAM_WRITEBACK \
-    -e ZRAM_MEMORY_TRACKING
-
-echo "Kernel performance optimizations applied"
 
 make $MAKE_ARGS -j$(nproc)
 

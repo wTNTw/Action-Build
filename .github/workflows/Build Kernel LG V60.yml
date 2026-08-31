@@ -200,7 +200,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: AnyKernel3_${{ inputs.ksu && format('ReSukiSU_{0}', env.KSUVER) || 'NoKernelSU' }}_LG_V60
+          name: ${{ inputs.ksu && format('ReSukiSU_{0}', env.KSUVER) || 'NoKernelSU' }}_LG_V60_AnyKernel3
           path: anykernel/*
           if-no-files-found: error
 

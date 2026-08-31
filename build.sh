@@ -384,7 +384,7 @@ echo "Kernel image and dtb copied successfully"
 
 cd anykernel || { echo "ERROR: Failed to cd into anykernel"; exit 1; }
 
-# Handle custom suffix
+# Handle custom suffix (optional user-defined, no random string by default)
 if [ -n "${SUFFIX}" ]; then
     if [ "${SUFFIX}" = "-1" ]; then
         # No custom suffix
@@ -394,12 +394,15 @@ if [ -n "${SUFFIX}" ]; then
         CUSTOM_SUFFIX="_${SUFFIX}"
     fi
 else
-    # Generate random suffix (fixed: use dd instead of cat to avoid hanging)
-    RANDOM_STR=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c 8)
-    CUSTOM_SUFFIX="_${RANDOM_STR}"
+    CUSTOM_SUFFIX=""
 fi
 
-ZIP_FILENAME=kiyo_${TARGET_DEVICE}_${KSU_ZIP_STR}${CUSTOM_SUFFIX}_$(date +'%Y%m%d_%H%M%S')_anykernel3.zip
+# Match unified naming: ReSukiSU_35114_LG_V60_AnyKernel3.zip
+if [ $KSU_ENABLE -eq 1 ]; then
+    ZIP_FILENAME=ReSukiSU_${KSU_VERSION}_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
+else
+    ZIP_FILENAME=NoKernelSU_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
+fi
 
 echo "Creating AnyKernel3 flashable zip: $ZIP_FILENAME"
 echo "Compressing files..."

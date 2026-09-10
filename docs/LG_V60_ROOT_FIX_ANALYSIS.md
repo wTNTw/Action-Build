@@ -203,6 +203,7 @@ static const char * const fw_path[] = {
 
 - 优点：零风险、零刷写。缺点：失去 IPC 隔离与 SysV IPC。
 - 状态：**设备所有者已确认这是可接受的方案**，因此当前无需任何改动。只有在确实需要独立 IPC namespace 时，才进入 A/C/D。
+- 落地方式：CI 的 `droid_spaces` 主开关已改为只展开上面这四个 ABI 中性开关（不再包含 `SYSVIPC`/`POSIX_MQUEUE`），所以「启用 droid_spaces」就是方案 0 —— 构建能正常出可刷入产物，容器侧配 `--ipc=host`。
 
 ### 方案 A（推荐主路径）：ramdisk 首阶段 `modules.load`
 

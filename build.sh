@@ -407,10 +407,9 @@ fi
 #
 #   已验证 ABI 中性（0 / 1327，已刷机验证）：
 #     ds_pid_ipc_ns   ds_user_ns   ds_devtmpfs   ds_xt
-#   会破坏 ABI、被 guard 拒绝：
+#   会破坏 ABI、被 guard 拒绝（需显式打开才生效，master 不再包含这两项）：
 #     ds_sysvipc       -> 710 / 1327
 #     ds_posix_mqueue  -> 577 / 1327
-#     因此 master 开关 DROID_SPACES=true（全开）一定是 710 / 1327，拿不到产物。
 #
 # 机制：SYSVIPC 或 POSIX_MQUEUE 任一打开都会让 IPC_NS 自动变 y
 #   （init/Kconfig: depends on (SYSVIPC || POSIX_MQUEUE)，且 default y），
@@ -431,13 +430,13 @@ fi
 #   adb shell getprop sys.boot_completed           # 期望 1
 #   adb shell su -c 'ls /proc/self/ns/'            # 缺 ipc 属预期（见上）
 # ==========================================================
-# master 开关：打开即启用全部细分项。
-# 警告：其中 SYSVIPC 会破坏 stock ABI，所以本开关打开后构建一定被 guard 拒绝；
-# 要拿可刷入的产物请只用上面已验证 ABI 中性的细分开关。
+# master 开关：打开即启用上面那组已验证 ABI 中性的细分项。
+# 注意：master 不包含 SYSVIPC / POSIX_MQUEUE，因此它给出的是「无独立 IPC ns」的
+# 容器支持（容器请以 --ipc=host 语义运行）；要 IPC namespace 必须再显式打开
+# ds_sysvipc 或 ds_posix_mqueue，而那会让构建被 guard 拒绝。在让设备加载与内核
+# 同源的模块之前，IPC ns 拿不到（见 docs/LG_V60_ROOT_FIX_ANALYSIS.md）。
 if [ "$DROID_SPACES_ENABLE" = "true" ]; then
     DS_PID_IPC_NS_ENABLE=true
-    DS_SYSVIPC_ENABLE=true
-    DS_POSIX_MQUEUE_ENABLE=true
     DS_USER_NS_ENABLE=true
     DS_DEVTMPFS_ENABLE=true
     DS_XT_ENABLE=true

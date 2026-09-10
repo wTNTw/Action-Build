@@ -30,7 +30,7 @@ LG V60 的 vendor 模块（音频 30 个、`wlan`、`rmnet_perf`、`rmnet_shs`�
 | `netfilter` | `true` | |
 | `ccm` | `true` | BBRv1 + FQ / FQ_CODEL |
 | `ipv6_nat` | `true` | IPv6 NAT / REDIRECT / NPT |
-| `droid_spaces` | `false` | 主开关**不要开**，见下节 |
+| `droid_spaces` | `true` | 主开关，只展开下面四个 ABI 中性开关；提供能力但不提供 IPC ns（见下节） |
 | `ds_pid_ipc_ns` | `true` | mount / PID / net / UTS 命名空间 |
 | `ds_sysvipc` | `false` | **会破坏 ABI** |
 | `ds_posix_mqueue` | `false` | **会破坏 ABI** |
@@ -39,14 +39,16 @@ LG V60 的 vendor 模块（音频 30 个、`wlan`、`rmnet_perf`、`rmnet_shs`�
 | `ds_xt` | `true` | 实际只落地 `NETFILTER_XT_MATCH_RECENT`，见下节 |
 | `suffix` | 自定 | |
 
-> `droid_spaces` 主开关一旦打开会启用**全部**细分项，其中 `SYSVIPC` 已被证实破坏 ABI，因此 `droid_spaces=true` 的构建一定会被 guard 拒绝、拿不到产物。要拿产物请用上表的细分开关组合。
+> `droid_spaces` 主开关自 2026-09-10 起只展开**已验证 ABI 中性**的四个细分项（`ds_pid_ipc_ns`、`ds_user_ns`、`ds_devtmpfs`、`ds_xt`），不再包含 `SYSVIPC` / `POSIX_MQUEUE`，因此可以直接打开并拿到可刷入产物。它提供的是「无独立 IPC namespace」的容器支持，容器需以 `--ipc=host` 语义运行；要 IPC ns 必须再显式打开 `ds_sysvipc` 或 `ds_posix_mqueue`，而这两项会让构建被 guard 拒绝（§三 #4/#5）。
+>
+> 在此之前该主开关是「全开」，即 `droid_spaces=true` 必然包含 `SYSVIPC`、构建一定被拒绝（§三 #2 就是旧语义下的结果）。
 
 ## 三、ABI 实验矩阵
 
 | # | 配置（除基线外） | `mismatched` | 结果 |
 | --- | --- | --- | --- |
 | 1 | 特性全关 | `0 / 517`（当时口径） | 通过 |
-| 2 | `droid_spaces=true` + `ipv6_nat` | `253 / 517` → 守卫上线后同配置 `710 / 1327` | 拒绝 |
+| 2 | `droid_spaces=true` + `ipv6_nat`（**旧语义：主开关全开，含 `SYSVIPC`**） | `253 / 517` → 守卫上线后同配置 `710 / 1327` | 拒绝 |
 | 3 | 上表推荐组合 | **`0 / 1327`** | **通过，已刷机验证** |
 | 4 | #3 再加上 `ds_sysvipc=true` | **`710 / 1327`** | 拒绝 |
 | 5 | #3 再加上 `ds_posix_mqueue=true`（不含 `SYSVIPC`） | **`577 / 1327`** | 拒绝 |
@@ -108,6 +110,7 @@ stock /vendor 模块拒绝加载（disagrees about version of symbol ...）
 
 | 开关 | `scripts/config` 写入 | 实际落地 |
 | --- | --- | --- |
+| `droid_spaces`（主开关） | 不直接写 config | 只把 `ds_pid_ipc_ns`/`ds_user_ns`/`ds_devtmpfs`/`ds_xt` 置为 true；**不再包含** `ds_sysvipc`/`ds_posix_mqueue`，因此不会破坏 ABI |
 | `ds_pid_ipc_ns` | `NAMESPACES` `PID_NS` `IPC_NS` | `IPC_NS` 在 `SYSVIPC`/`POSIX_MQUEUE` 都关时不产生 `.config` 条目，`-e IPC_NS` 是空操作；实际得到 mount / PID / net / UTS 命名空间 |
 | `ds_sysvipc` | `SYSVIPC` `SYSVIPC_SYSCTL` `SYSVIPC_COMPAT` | 破坏 ABI（710） |
 | `ds_posix_mqueue` | `POSIX_MQUEUE` `POSIX_MQUEUE_SYSCTL` | 破坏 ABI（577） |

@@ -724,6 +724,13 @@ for sym, crc in baseline.items():
 print("stock baseline symbols: %d | compared: %d | mismatched: %d | not in our build: %d"
       % (len(baseline), compared, len(mismatch), len(missing)))
 
+if compared == 0:
+    print("")
+    print("BUILD REJECTED: nothing to compare - no built module symbols were found")
+    print("ABI compatibility is therefore UNKNOWN, not OK. Check that")
+    print("modules_install produced .ko files and that out/Module.symvers exists.")
+    sys.exit(1)
+
 if mismatch:
     print("")
     print("==========================================================")

@@ -65,6 +65,36 @@ on:
         required: true
         type: boolean
         default: false
+      ds_pid_ipc_ns:
+        description: 'droid_spaces 细分：NAMESPACES/PID_NS/IPC_NS'
+        required: true
+        type: boolean
+        default: false
+      ds_sysvipc:
+        description: 'droid_spaces 细分：SYSVIPC + SYSVIPC_SYSCTL + SYSVIPC_COMPAT'
+        required: true
+        type: boolean
+        default: false
+      ds_posix_mqueue:
+        description: 'droid_spaces 细分：POSIX_MQUEUE + POSIX_MQUEUE_SYSCTL'
+        required: true
+        type: boolean
+        default: false
+      ds_user_ns:
+        description: 'droid_spaces 细分：USER_NS（Android 默认关闭，安全敏感）'
+        required: true
+        type: boolean
+        default: false
+      ds_devtmpfs:
+        description: 'droid_spaces 细分：DEVTMPFS + DEVTMPFS_MOUNT'
+        required: true
+        type: boolean
+        default: false
+      ds_xt:
+        description: 'droid_spaces 细分：NETFILTER_XT_TARGET_REJECT/LOG + MATCH_RECENT'
+        required: true
+        type: boolean
+        default: false
       ipv6_nat:
         description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
         required: true
@@ -143,6 +173,12 @@ jobs:
           CCM: ${{ inputs.ccm }}
           DROID_SPACES: ${{ inputs.droid_spaces }}
           IPV6_NAT: ${{ inputs.ipv6_nat }}
+          DS_PID_IPC_NS: ${{ inputs.ds_pid_ipc_ns }}
+          DS_SYSVIPC: ${{ inputs.ds_sysvipc }}
+          DS_POSIX_MQUEUE: ${{ inputs.ds_posix_mqueue }}
+          DS_USER_NS: ${{ inputs.ds_user_ns }}
+          DS_DEVTMPFS: ${{ inputs.ds_devtmpfs }}
+          DS_XT: ${{ inputs.ds_xt }}
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"

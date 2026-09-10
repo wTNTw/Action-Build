@@ -76,7 +76,11 @@ jobs:
       
       - name: Download Build Script
         run: |
-          curl -LO https://raw.githubusercontent.com/wTNTw/Action-Build/ReSukiSU/build.sh
+          # 跟随触发本工作流的分支，避免在 dev 分支上改了 build.sh 却不生效
+          # （用 raw 直链，分支名请不要包含 "/"）
+          BRANCH="${{ github.ref_name }}"
+          echo "=== Downloading build.sh from branch: $BRANCH ==="
+          curl -fLO "https://raw.githubusercontent.com/wTNTw/Action-Build/$BRANCH/build.sh"
           chmod +x build.sh
           echo "=== Downloaded build.sh ==="
           ls -lh build.sh

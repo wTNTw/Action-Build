@@ -64,7 +64,7 @@ on:
         description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
         required: true
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:

@@ -1,0 +1,10 @@
+# AI/agent 工作上下文，不外传
+.context/
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

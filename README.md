@@ -94,6 +94,12 @@
  
 # 更新日志
 >小的更新内容将被忽略 更多内容请参看提交
+
+- LG V60：移除 `droid_spaces` 与全部 `ds_*` 构建开关——在必须加载 stock `/vendor` 模块的前提下它拿不到容器真正需要的 IPC namespace（`SYSVIPC`/`POSIX_MQUEUE` 会破坏 ABI、被 guard 拒绝），保留下来的配置部分不构成可用特性；需要时可按文档手动加回
+ 
+- 新增[`docs/LG_V60_FEATURES_AND_ABI.md`](docs/LG_V60_FEATURES_AND_ABI.md)：LG V60 特性开关的构建期 ABI 全量对照记录，说明哪些配置会破坏 stock 模块 ABI、以及相关开关移除后如何手动加回
+ 
+- 新增[`docs/LG_V60_ROOT_FIX_ANALYSIS.md`](docs/LG_V60_ROOT_FIX_ANALYSIS.md)：LG V60 模块 ABI 约束的根治方案（让设备加载自编模块：ramdisk `modules.load` / KSU 覆盖 / vendor 镜像重写），含零设备改动的固件时序预检结论；当前配置无需改动，本文是将来必须用 IPC namespace 时的实施蓝图
  
 - 新增`FakeConfig(HideConfig)`，用于隐藏`proc/config.gz`内配置项可见性  
 ```

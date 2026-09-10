@@ -61,10 +61,10 @@ on:
         type: boolean
         default: true
       ipv6_nat:
-        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？已实测 ABI 中性（0/1327 符号差异），默认开启'
+        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
         required: true
         type: boolean
-        default: true
+        default: false
 
 jobs:
   build:

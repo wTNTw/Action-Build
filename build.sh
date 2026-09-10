@@ -111,6 +111,12 @@ NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
 IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 
+# droid_spaces 及其细分开关已于 2026-09-10 整体移除。容器真正缺的是 IPC
+# namespace，而在这棵内核树上拿 IPC ns 必须打开 SYSVIPC 或 POSIX_MQUEUE，
+# 代价是 stock /vendor 模块 ABI 被破坏、构建被 guard 拒绝；剩下的那部分配置
+# 不构成可用特性。需要时如何手动加回，见本文件 feature 段与
+# docs/LG_V60_FEATURES_AND_ABI.md
+
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
     KSU_ENABLE=1
@@ -389,21 +395,41 @@ else
 fi
 
 # ==========================================================
-# DROID_SPACES（保持禁用）
+# droid_spaces —— 已于 2026-09-10 整体移除
 # ----------------------------------------------------------
-# 2026-09-10 实测确认它确实会破坏 ABI：开启后内核有 710/1327 个符号的 CRC
-# 与官方 ROM 不一致（对照：只开 IPv6 NAT 时为 0/1327）。/vendor 里的 stock
-# 预编译模块绑定的是官方 CRC，于是全部被拒：
-#     <mod>: disagrees about version of symbol module_layout
-# 结果 /proc/modules 为空、WiFi/音频全部消失。
-# 要启用它必须先解决“让设备加载我们自己编译的模块”。
-echo "NOTE: DROID_SPACES is disabled (confirmed ABI-breaking: 710/1327 symbol CRC mismatch)"
+# 原开关组（master + ds_pid_ipc_ns / ds_sysvipc / ds_posix_mqueue /
+# ds_user_ns / ds_devtmpfs / ds_xt）提供不了容器真正需要的 IPC namespace：
+# IPC_NS 只能由 SYSVIPC 或 POSIX_MQUEUE 带出（init/Kconfig:
+# IPC_NS depends on (SYSVIPC || POSIX_MQUEUE)，且 default y），而这两者会改
+# struct nsproxy / struct task_struct 的布局，实测破坏 710 / 577 个 stock
+# 符号 CRC，构建被 guard 拒绝（实验矩阵见 docs/LG_V60_FEATURES_AND_ABI.md）。
+# 剩下的那部分配置（PID_NS / USER_NS / DEVTMPFS / XT_MATCH_RECENT）单独存在
+# 不构成可用特性，故不再作为构建开关暴露。
+#
+# 需要时手动加回（ABI 中性部分）：
+#   scripts/config --file out/.config -e NAMESPACES -e PID_NS -e USER_NS \
+#       -e DEVTMPFS -e DEVTMPFS_MOUNT -e NETFILTER_XT_MATCH_RECENT
+# 连 IPC ns 一起要（会破坏 ABI、构建被拒绝）：
+#   scripts/config --file out/.config -e SYSVIPC -e SYSVIPC_SYSCTL \
+#       -e SYSVIPC_COMPAT
+# 根治路线（让设备加载与内核同源的模块，之后这些限制才消失）：
+#   docs/LG_V60_ROOT_FIX_ANALYSIS.md
+#
+# 刷入后仍值得验证的项：
+#   adb shell getprop sys.boot_completed                       # 期望 1
+#   adb shell su -c 'wc -l /proc/modules'                      # 期望 34
+#   adb shell 'cmd wifi status | head -3'                      # 期望 connected
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "IP6_NF_NAT"'
+# ==========================================================
 
 # ==========================================================
-# IPv6 NAT / Redirect（已实测 ABI 中性）
+# IPv6 NAT (optional, default off)
 # ----------------------------------------------------------
-# 与官方 ROM 逐符号对照：开启后 0/1327 差异，stock 模块照常加载。
-# 设备实测：IPv6 nat/raw/mangle/filter 表齐全，WiFi 正常，开机无异常。
+# 与 SukiSU-Ultra 分支 workflow 里 NETFILTER 组中的 IPv6 NAT 部分保持一致，
+# 使两个分支的该特性定义相同。IP6_NF_NAT 是开关，其余目标选项依赖它，
+# 同一次 scripts/config 调用里一起写进 .config 后由 kconfig 解析生效。
+# 刷入后验证：
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "IP6_NF_NAT|NFT_NAT_IPV6"'
 # ==========================================================
 if [ "$IPV6_NAT_ENABLE" = "true" ]; then
     echo "Enabling IPv6 NAT / Redirect support..."
@@ -417,7 +443,7 @@ if [ "$IPV6_NAT_ENABLE" = "true" ]; then
         -e NFT_NAT_IPV6
     echo "IPv6 NAT enabled: MASQUERADE / REDIRECT / DNAT-SNAT / NPT"
 else
-    echo "IPv6 NAT disabled"
+    echo "IPv6 NAT disabled (default)"
 fi
 
 make $MAKE_ARGS -j$(nproc)
@@ -505,6 +531,173 @@ if grep -q "CONFIG_MODULES=y" "out/.config"; then
         
         # Set file permissions
         find "$TARGET_KV_DIR" -name "*.ko" -type f -exec chmod 644 {} +
+
+        # ==========================================================
+        # 模块 ABI 校验：与官方 stock 模块逐符号对照
+        # ----------------------------------------------------------
+        # CONFIG_MODVERSIONS=y 时内核会逐符号比对 CRC（另有每个模块都带的合成
+        # 符号 module_layout）。只要有一个符号对不上，对应 stock 模块就拒绝加载：
+        #     <mod>: disagrees about version of symbol <sym>
+        # 结果是 /proc/modules 为空、WiFi/音频全部消失（“掉驱动”）。
+        #
+        # 基线取自 ROM 的 /vendor/lib/modules/*.ko（ci/stock-symbol-crcs.txt），
+        # “本内核 CRC”取自自编 .ko 的 __versions + out/Module.symvers。
+        # 0 差异 = stock 模块能全部加载。拉不到基线时退化为只查 module_layout。
+        # ==========================================================
+        STOCK_CRC_FILE=/tmp/stock-symbol-crcs.txt
+        AB_BRANCH="${GITHUB_REF_NAME:-dev}"
+        rm -f "$STOCK_CRC_FILE"
+        if curl -fsSL "https://raw.githubusercontent.com/wTNTw/Action-Build/$AB_BRANCH/ci/stock-symbol-crcs.txt" -o "$STOCK_CRC_FILE" 2>/dev/null; then
+            echo "Fetched stock ABI baseline: $(grep -c '^[A-Za-z_]' "$STOCK_CRC_FILE") symbols (branch $AB_BRANCH)"
+        else
+            echo "WARN: cannot fetch ci/stock-symbol-crcs.txt from branch $AB_BRANCH"
+            echo "WARN: falling back to module_layout-only check"
+            rm -f "$STOCK_CRC_FILE"
+        fi
+
+        MODCHECK_DIR="$TARGET_KV_DIR" STOCK_CRC_FILE="$STOCK_CRC_FILE" python3 - <<'MODCHECK_PYEOF'
+import glob
+import os
+import struct
+import sys
+
+
+def versions_of(path):
+    try:
+        d = open(path, "rb").read()
+    except Exception:
+        return {}
+    if d[:4] != b"\x7fELF":
+        return {}
+    is64 = d[4] == 2
+    e_shoff = struct.unpack_from("<Q", d, 0x28)[0] if is64 else struct.unpack_from("<I", d, 0x20)[0]
+    e_shentsize = struct.unpack_from("<H", d, 0x3A)[0] if is64 else struct.unpack_from("<H", d, 0x2E)[0]
+    e_shnum = struct.unpack_from("<H", d, 0x3C)[0] if is64 else struct.unpack_from("<H", d, 0x30)[0]
+    e_shstrndx = struct.unpack_from("<H", d, 0x3E)[0] if is64 else struct.unpack_from("<H", d, 0x32)[0]
+
+    def sec(i):
+        off = e_shoff + i * e_shentsize
+        name = struct.unpack_from("<I", d, off)[0]
+        if is64:
+            _f, _a, o, s = struct.unpack_from("<QQQQ", d, off + 8)
+        else:
+            _f, _a, o, s = struct.unpack_from("<IIII", d, off + 8)
+        return name, o, s
+
+    secs = [sec(i) for i in range(e_shnum)]
+    so = secs[e_shstrndx][1]
+
+    def sn(i):
+        a = so + i
+        b = d.index(b"\x00", a)
+        return d[a:b].decode("ascii", "replace")
+
+    out = {}
+    for ni, o, s in secs:
+        if sn(ni) != "__versions":
+            continue
+        for i in range(s // 64):
+            base = o + i * 64
+            crc = struct.unpack_from("<Q", d, base)[0] & 0xFFFFFFFF
+            nm = d[base + 8: base + 64].split(b"\x00")[0].decode("ascii", "replace")
+            if nm:
+                out[nm] = crc
+    return out
+
+
+root = os.environ["MODCHECK_DIR"]
+ours = {}
+kos = sorted(glob.glob(os.path.join(root, "**", "*.ko"), recursive=True))
+for ko in kos:
+    ours.update(versions_of(ko))
+
+symvers = os.path.join("out", "Module.symvers")
+symvers_found = os.path.isfile(symvers)
+if symvers_found:
+    for line in open(symvers, encoding="utf-8", errors="replace"):
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0].startswith("0x"):
+            try:
+                ours[parts[1]] = int(parts[0], 16)
+            except ValueError:
+                pass
+
+print("our modules scanned: %d, our symbols: %d (Module.symvers: %s)"
+      % (len(kos), len(ours), "yes" if symvers_found else "no"))
+if "module_layout" not in ours:
+    print("WARN: module_layout not found in our modules; cannot verify")
+
+base_path = os.environ.get("STOCK_CRC_FILE", "")
+baseline = {}
+if base_path and os.path.isfile(base_path):
+    for line in open(base_path, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) == 2 and parts[1].startswith("0x"):
+            try:
+                baseline[parts[0]] = int(parts[1], 16)
+            except ValueError:
+                pass
+
+if not baseline:
+    got = ours.get("module_layout")
+    print("stock baseline unavailable -> module_layout-only check")
+    if got is None:
+        print("WARN: module_layout missing, skip")
+        sys.exit(0)
+    print("built kernel module_layout CRC = 0x%08x" % got)
+    if got != 0xD273BD0C:
+        print("BUILD REJECTED: module_layout CRC mismatch (expected 0xd273bd0c)")
+        sys.exit(1)
+    print("OK: module_layout CRC matches the stock vendor modules")
+    sys.exit(0)
+
+compared = 0
+mismatch = []
+missing = []
+for sym, crc in baseline.items():
+    if sym not in ours:
+        missing.append(sym)
+        continue
+    compared += 1
+    if ours[sym] != crc:
+        mismatch.append((sym, ours[sym], crc))
+
+print("stock baseline symbols: %d | compared: %d | mismatched: %d | not in our build: %d"
+      % (len(baseline), compared, len(mismatch), len(missing)))
+
+if compared == 0:
+    print("")
+    print("BUILD REJECTED: nothing to compare - no built module symbols were found")
+    print("ABI compatibility is therefore UNKNOWN, not OK. Check that")
+    print("modules_install produced .ko files and that out/Module.symvers exists.")
+    sys.exit(1)
+
+if mismatch:
+    print("")
+    print("==========================================================")
+    print("BUILD REJECTED: kernel ABI differs from the stock ROM")
+    print("")
+    for sym, a, b in mismatch[:25]:
+        print("  %-42s ours=0x%08x stock=0x%08x" % (sym, a, b))
+    if len(mismatch) > 25:
+        print("  ... and %d more" % (len(mismatch) - 25))
+    print("")
+    print("These stock /vendor modules will refuse to load:")
+    print("  <mod>: disagrees about version of symbol <sym>")
+    print("=> /proc/modules ends up empty, WiFi and audio are gone.")
+    print("Revert the kernel config change that caused this.")
+    print("==========================================================")
+    sys.exit(1)
+
+print("OK: 0 differences vs the stock ROM -> all /vendor modules will load")
+if missing:
+    print("WARN: %d baseline symbols are not exported by this build (not verified)" % len(missing))
+    print("WARN: first 20: %s" % ", ".join(sorted(missing)[:20]))
+sys.exit(0)
+MODCHECK_PYEOF
         
         # Genrate modules.dep
         echo "Injecting verified stock modules.dep layout..."

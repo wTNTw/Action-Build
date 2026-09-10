@@ -17,11 +17,6 @@ on:
         required: false
         default: ''
         type: string
-      droid_spaces:
-        description: '添加轻量级 Linux 容器支持 (DroidSpaces)？已知会破坏 vendor 驱动，默认关闭'
-        required: true
-        type: boolean
-        default: false
       zram:
         description: 'ZRAM (0关闭/1开启)/算法名/大小'
         required: true
@@ -65,7 +60,7 @@ concurrency:
 
 jobs:
   build:
-    name: LG V60 (${{ inputs.kernel_branch }} KSU${{ inputs.droid_spaces && ' DS' || '' }}${{ inputs.suffix && format(' {0}', inputs.suffix) || '' }})
+    name: LG V60 (${{ inputs.kernel_branch }} KSU${{ inputs.suffix && format(' {0}', inputs.suffix) || '' }})
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: content
@@ -289,7 +284,6 @@ jobs:
         env:
           KSU_ENABLE: 'true'
           SUSFS_ENABLE: 'true'
-          DROID_SPACES: ${{ inputs.droid_spaces }}
           NETFILTER: ${{ inputs.netfilter }}
           ZRAM: ${{ inputs.zram }}
         run: |
@@ -321,21 +315,12 @@ jobs:
             fi
           fi
 
-
-          if [ "$DROID_SPACES" == "true" ]; then
-            # 轻量 Linux 容器支持（4.19 可用项；CONFIG_NTSYNC 仅 5.10+ 无 Kconfig）
-            scripts/config --file out/.config \
-              -e SYSVIPC \
-              -e DEVTMPFS \
-              -e PID_NS \
-              -e IPC_NS \
-              -e USER_NS \
-              -e NAMESPACES \
-              -e POSIX_MQUEUE \
-              -e NETFILTER_XT_TARGET_REJECT \
-              -e NETFILTER_XT_TARGET_LOG \
-              -e NETFILTER_XT_MATCH_RECENT
-          fi
+          # droid_spaces 已于 2026-09-10 移除：它要求的 SYSVIPC / POSIX_MQUEUE 会改
+          # struct task_struct / nsproxy 布局，实测令 710 / 577 个 stock 导出符号 CRC
+          # 与官方 ROM 不一致，/vendor 预编译模块全部拒载（WiFi、音频消失）。
+          # 需要时见 Action-Build dev 分支 docs/LG_V60_FEATURES_AND_ABI.md，按其中
+          # 的 scripts/config 行手动加回；仅 PID_NS / USER_NS / DEVTMPFS /
+          # NETFILTER_XT_MATCH_RECENT 是实测 ABI 中性的，可安全打开。
 
           if [ "$NETFILTER" == "true" ]; then
             scripts/config --file out/.config \
@@ -539,7 +524,6 @@ jobs:
 
           KSU_STR="ReSukiSU-SuSFS"
           FLAGS=""
-          [ "${{ inputs.droid_spaces }}" == "true" ] && FLAGS="${FLAGS}_DS"
           SUFFIX_PART=""
           if [ -n "${{ inputs.suffix }}" ] && [ "${{ inputs.suffix }}" != "-1" ]; then
             SUFFIX_PART="_${{ inputs.suffix }}"

@@ -109,17 +109,13 @@ KPM_OPTION=${KPM_OPTION:-KPM}
 RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
-DROID_SPACES_ENABLE=${DROID_SPACES:-false}
 IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 
-# droid_spaces 细分开关（便于二分定位到底是哪个选项破坏 ABI）
-# DROID_SPACES=true 时以下全部打开；否则按各自的值生效。
-DS_PID_IPC_NS_ENABLE=${DS_PID_IPC_NS:-false}
-DS_SYSVIPC_ENABLE=${DS_SYSVIPC:-false}
-DS_POSIX_MQUEUE_ENABLE=${DS_POSIX_MQUEUE:-false}
-DS_USER_NS_ENABLE=${DS_USER_NS:-false}
-DS_DEVTMPFS_ENABLE=${DS_DEVTMPFS:-false}
-DS_XT_ENABLE=${DS_XT:-false}
+# droid_spaces 及其细分开关已于 2026-09-10 整体移除。容器真正缺的是 IPC
+# namespace，而在这棵内核树上拿 IPC ns 必须打开 SYSVIPC 或 POSIX_MQUEUE，
+# 代价是 stock /vendor 模块 ABI 被破坏、构建被 guard 拒绝；剩下的那部分配置
+# 不构成可用特性。需要时如何手动加回，见本文件 feature 段与
+# docs/LG_V60_FEATURES_AND_ABI.md
 
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
@@ -133,9 +129,7 @@ echo "KPM_OPTION: $KPM_OPTION"
 echo "RE_KERNEL: $RE_KERNEL_ENABLE"
 echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
-echo "DROID_SPACES: $DROID_SPACES_ENABLE"
 echo "IPV6_NAT: $IPV6_NAT_ENABLE"
-echo "droid_spaces sub-switches: pid_ipc_ns=$DS_PID_IPC_NS_ENABLE sysvipc=$DS_SYSVIPC_ENABLE posix_mqueue=$DS_POSIX_MQUEUE_ENABLE user_ns=$DS_USER_NS_ENABLE devtmpfs=$DS_DEVTMPFS_ENABLE xt=$DS_XT_ENABLE"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -401,97 +395,32 @@ else
 fi
 
 # ==========================================================
-# DROID_SPACES (optional, default off) - 轻量 Linux 容器支持
+# droid_spaces —— 已于 2026-09-10 整体移除
 # ----------------------------------------------------------
-# 实测结论（2026-09-10，构建期全量 ABI 对照，基线 = 1327 个 stock 符号）：
+# 原开关组（master + ds_pid_ipc_ns / ds_sysvipc / ds_posix_mqueue /
+# ds_user_ns / ds_devtmpfs / ds_xt）提供不了容器真正需要的 IPC namespace：
+# IPC_NS 只能由 SYSVIPC 或 POSIX_MQUEUE 带出（init/Kconfig:
+# IPC_NS depends on (SYSVIPC || POSIX_MQUEUE)，且 default y），而这两者会改
+# struct nsproxy / struct task_struct 的布局，实测破坏 710 / 577 个 stock
+# 符号 CRC，构建被 guard 拒绝（实验矩阵见 docs/LG_V60_FEATURES_AND_ABI.md）。
+# 剩下的那部分配置（PID_NS / USER_NS / DEVTMPFS / XT_MATCH_RECENT）单独存在
+# 不构成可用特性，故不再作为构建开关暴露。
 #
-#   已验证 ABI 中性（0 / 1327，已刷机验证）：
-#     ds_pid_ipc_ns   ds_user_ns   ds_devtmpfs   ds_xt
-#   会破坏 ABI、被 guard 拒绝（需显式打开才生效，master 不再包含这两项）：
-#     ds_sysvipc       -> 710 / 1327
-#     ds_posix_mqueue  -> 577 / 1327
+# 需要时手动加回（ABI 中性部分）：
+#   scripts/config --file out/.config -e NAMESPACES -e PID_NS -e USER_NS \
+#       -e DEVTMPFS -e DEVTMPFS_MOUNT -e NETFILTER_XT_MATCH_RECENT
+# 连 IPC ns 一起要（会破坏 ABI、构建被拒绝）：
+#   scripts/config --file out/.config -e SYSVIPC -e SYSVIPC_SYSCTL \
+#       -e SYSVIPC_COMPAT
+# 根治路线（让设备加载与内核同源的模块，之后这些限制才消失）：
+#   docs/LG_V60_ROOT_FIX_ANALYSIS.md
 #
-# 机制：SYSVIPC 或 POSIX_MQUEUE 任一打开都会让 IPC_NS 自动变 y
-#   （init/Kconfig: depends on (SYSVIPC || POSIX_MQUEUE)，且 default y），
-#   于是 struct nsproxy 增加 ipc_ns、struct task_struct 增加 sysv_sem/sysv_shm，
-#   genksyms 递归展开后数百个导出符号 CRC 变化，stock /vendor 模块拒绝加载。
-#   这也不是“放宽校验”能解决的：字段偏移会整体位移，绕过 CRC 等于把 vendor
-#   模块绑到语义已变的类型上。
-#
-# 结果：在必须继续加载 stock /vendor 模块的前提下，IPC namespace 拿不到，
-#   容器需以 --ipc=host 语义运行。完整实验矩阵、差异符号与后续选项见
-#   docs/LG_V60_FEATURES_AND_ABI.md
-#
-# 刷入后请验证：
-#   adb shell su -c 'zcat /proc/config.gz | grep -E "SYSVIPC|USER_NS|PID_NS|DEVTMPFS"'
-#   adb shell su -c 'wc -l /proc/modules'          # 期望 34
-#   adb shell su -c 'dmesg | grep -ic "disagrees about version"'  # 期望 0
-#   adb shell 'cmd wifi status | head -3'          # 期望 connected
-#   adb shell getprop sys.boot_completed           # 期望 1
-#   adb shell su -c 'ls /proc/self/ns/'            # 缺 ipc 属预期（见上）
+# 刷入后仍值得验证的项：
+#   adb shell getprop sys.boot_completed                       # 期望 1
+#   adb shell su -c 'wc -l /proc/modules'                      # 期望 34
+#   adb shell 'cmd wifi status | head -3'                      # 期望 connected
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "IP6_NF_NAT"'
 # ==========================================================
-# master 开关：打开即启用上面那组已验证 ABI 中性的细分项。
-# 注意：master 不包含 SYSVIPC / POSIX_MQUEUE，因此它给出的是「无独立 IPC ns」的
-# 容器支持（容器请以 --ipc=host 语义运行）；要 IPC namespace 必须再显式打开
-# ds_sysvipc 或 ds_posix_mqueue，而那会让构建被 guard 拒绝。在让设备加载与内核
-# 同源的模块之前，IPC ns 拿不到（见 docs/LG_V60_ROOT_FIX_ANALYSIS.md）。
-if [ "$DROID_SPACES_ENABLE" = "true" ]; then
-    DS_PID_IPC_NS_ENABLE=true
-    DS_USER_NS_ENABLE=true
-    DS_DEVTMPFS_ENABLE=true
-    DS_XT_ENABLE=true
-fi
-
-DS_ANY=false
-
-if [ "$DS_PID_IPC_NS_ENABLE" = "true" ]; then
-    DS_ANY=true
-    # IPC_NS 依赖 (SYSVIPC || POSIX_MQUEUE)：两者都关时该符号不产生 .config
-    # 条目，此处 -e IPC_NS 是空操作（见 docs/LG_V60_FEATURES_AND_ABI.md 第五节）。
-    echo "ds_pid_ipc_ns -> NAMESPACES PID_NS IPC_NS"
-    scripts/config --file out/.config -e NAMESPACES -e PID_NS -e IPC_NS
-fi
-
-if [ "$DS_SYSVIPC_ENABLE" = "true" ]; then
-    DS_ANY=true
-    echo "ds_sysvipc -> SYSVIPC SYSVIPC_SYSCTL SYSVIPC_COMPAT"
-    scripts/config --file out/.config -e SYSVIPC -e SYSVIPC_SYSCTL -e SYSVIPC_COMPAT
-fi
-
-if [ "$DS_POSIX_MQUEUE_ENABLE" = "true" ]; then
-    DS_ANY=true
-    echo "ds_posix_mqueue -> POSIX_MQUEUE POSIX_MQUEUE_SYSCTL"
-    scripts/config --file out/.config -e POSIX_MQUEUE -e POSIX_MQUEUE_SYSCTL
-fi
-
-if [ "$DS_USER_NS_ENABLE" = "true" ]; then
-    DS_ANY=true
-    echo "ds_user_ns -> USER_NS"
-    scripts/config --file out/.config -e USER_NS
-fi
-
-if [ "$DS_DEVTMPFS_ENABLE" = "true" ]; then
-    DS_ANY=true
-    echo "ds_devtmpfs -> DEVTMPFS DEVTMPFS_MOUNT"
-    scripts/config --file out/.config -e DEVTMPFS -e DEVTMPFS_MOUNT
-fi
-
-if [ "$DS_XT_ENABLE" = "true" ]; then
-    DS_ANY=true
-    # 注意：本内核树的 net/netfilter/Kconfig 中没有 NETFILTER_XT_TARGET_REJECT
-    # 条目，该 -e 是空操作（REJECT 以 IP_NF_TARGET_REJECT / IP6_NF_TARGET_REJECT
-    # 形式存在，stock 本就为 y）；NETFILTER_XT_TARGET_LOG 同理已是 stock y。
-    # 因此本开关实际只落地 NETFILTER_XT_MATCH_RECENT。
-    echo "ds_xt -> NETFILTER_XT_MATCH_RECENT (TARGET_REJECT 本树无此符号, TARGET_LOG 已由 stock 启用)"
-    scripts/config --file out/.config \
-        -e NETFILTER_XT_TARGET_REJECT \
-        -e NETFILTER_XT_TARGET_LOG \
-        -e NETFILTER_XT_MATCH_RECENT
-fi
-
-if [ "$DS_ANY" = "false" ]; then
-    echo "droid_spaces: all sub-switches disabled"
-fi
 
 # ==========================================================
 # IPv6 NAT (optional, default off)

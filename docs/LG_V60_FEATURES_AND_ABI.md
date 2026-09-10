@@ -30,18 +30,13 @@ LG V60 的 vendor 模块（音频 30 个、`wlan`、`rmnet_perf`、`rmnet_shs`�
 | `netfilter` | `true` | |
 | `ccm` | `true` | BBRv1 + FQ / FQ_CODEL |
 | `ipv6_nat` | `true` | IPv6 NAT / REDIRECT / NPT |
-| `droid_spaces` | `true` | 主开关，只展开下面四个 ABI 中性开关；提供能力但不提供 IPC ns（见下节） |
-| `ds_pid_ipc_ns` | `true` | mount / PID / net / UTS 命名空间 |
-| `ds_sysvipc` | `false` | **会破坏 ABI** |
-| `ds_posix_mqueue` | `false` | **会破坏 ABI** |
-| `ds_user_ns` | `true` | userns（Android 默认关闭，安全敏感） |
-| `ds_devtmpfs` | `true` | `DEVTMPFS` + `DEVTMPFS_MOUNT` |
-| `ds_xt` | `true` | 实际只落地 `NETFILTER_XT_MATCH_RECENT`，见下节 |
 | `suffix` | 自定 | |
 
-> `droid_spaces` 主开关自 2026-09-10 起只展开**已验证 ABI 中性**的四个细分项（`ds_pid_ipc_ns`、`ds_user_ns`、`ds_devtmpfs`、`ds_xt`），不再包含 `SYSVIPC` / `POSIX_MQUEUE`，因此可以直接打开并拿到可刷入产物。它提供的是「无独立 IPC namespace」的容器支持，容器需以 `--ipc=host` 语义运行；要 IPC ns 必须再显式打开 `ds_sysvipc` 或 `ds_posix_mqueue`，而这两项会让构建被 guard 拒绝（§三 #4/#5）。
+> **2026-09-10：`droid_spaces` 主开关与全部六个 `ds_*` 细分开关已从构建中整体移除。** 原因不是它们不安全，而是它们提供不了容器真正需要的东西：容器缺的关键项是 IPC namespace，而在这棵内核树上拿 `IPC_NS` 必须打开 `SYSVIPC` 或 `POSIX_MQUEUE`（见 §四），两者都会破坏 stock 模块 ABI 并被 guard 拒绝；剩下那部分配置（`PID_NS` / `USER_NS` / `DEVTMPFS` / `XT_MATCH_RECENT`）单独存在不构成完整特性。
 >
-> 在此之前该主开关是「全开」，即 `droid_spaces=true` 必然包含 `SYSVIPC`、构建一定被拒绝（§三 #2 就是旧语义下的结果）。
+> 这样处理的实际后果：此后构建出的内核**不再额外获得** `PID_NS`、`USER_NS`、`DEVTMPFS`、`NETFILTER_XT_MATCH_RECENT`（stock 自带的 `NAMESPACES` / `UTS_NS` / `NET_NS` 仍在）。需要时按 §五 的 `scripts/config` 行手动加回——那四项是 ABI 中性的，加回后 guard 依然会通过；要 `SYSVIPC` / `POSIX_MQUEUE` 则必须先做根治（`docs/LG_V60_ROOT_FIX_ANALYSIS.md`）。
+>
+> 开关逻辑的完整版本可用 `git show 163025f:build.sh` 取回（那次提交把主开关收窄为四个 ABI 中性项，其后一次提交整体移除）。
 
 ## 三、ABI 实验矩阵
 
@@ -52,6 +47,8 @@ LG V60 的 vendor 模块（音频 30 个、`wlan`、`rmnet_perf`、`rmnet_shs`�
 | 3 | 上表推荐组合 | **`0 / 1327`** | **通过，已刷机验证** |
 | 4 | #3 再加上 `ds_sysvipc=true` | **`710 / 1327`** | 拒绝 |
 | 5 | #3 再加上 `ds_posix_mqueue=true`（不含 `SYSVIPC`） | **`577 / 1327`** | 拒绝 |
+
+> #2 / #4 / #5 使用的 `ds_*` 开关已按 §二 说明移除；复现这三行需先按 §五 手动写回对应 `scripts/config` 行（`SYSVIPC` / `POSIX_MQUEUE` 本身仍需小心：它们会破坏 ABI，而这正是这三行要记录的事）。
 
 ### 集合关系
 
@@ -106,7 +103,9 @@ stock /vendor 模块拒绝加载（disagrees about version of symbol ...）
 
 要彻底解决只有一条路：让设备加载与内核同源编译的模块（bind-mount 覆盖 `/vendor/lib/modules`，或改写 `modules.dep` 指向别处），此后 ABI 约束消失，全部特性可开。直接以 rw 挂载 `/vendor` 写入会动到 `dm-verity`，风险最高。
 
-## 五、各细分开关的实际效果
+## 五、各细分开关的实际效果（历史记录）
+
+这些开关已从构建中移除，本节保留用于说明每个配置项实际写入了什么、会造成什么后果——将来需要时按此表手动加回。
 
 | 开关 | `scripts/config` 写入 | 实际落地 |
 | --- | --- | --- |
@@ -154,7 +153,9 @@ adb shell su -c 'ls /proc/self/ns/'    # 含 ipc 表示 IPC ns 可用；当前�
 
 ```bash
 # 触发一次构建（需要 GitHub token，脚本从 .cred 读取，不打印）
-python dispatch2.py suffix=-S3 ds_sysvipc=true ds_posix_mqueue=false
+# 注意：workflow 已不再有 droid_spaces / ds_* 输入，要复现 §三 的对照实验，
+# 须先按 §五 把对应 scripts/config 行写回 build.sh，再触发构建。
+python dispatch2.py suffix=-S3
 
 # 拉取构建日志并提取 guard 判定行与差异符号
 python fetchlog.py <run_id> <job_id>
@@ -167,5 +168,7 @@ python fetchlog.py <run_id> <job_id>
 | `cb2b3b2` | 全量 stock ABI 对照 + `droid_spaces` 细分开关 |
 | `2b264ef` | `module_layout` CRC 不一致即终止构建 |
 | `d159804` | 对照为空（一个符号都没比上）时也拒绝，避免"空比较即通过" |
+| `163025f` | `droid_spaces` 主开关收窄为只展开四个 ABI 中性子开关 |
+| 本文件所在提交 | 整体移除 `droid_spaces` 与全部 `ds_*` 构建开关（§二） |
 | `711b805` | 基线：全部特性关闭 |
 | `68996fa` | `droid_spaces` + `ipv6_nat` 可选开关（全开，已被证实破坏 ABI） |

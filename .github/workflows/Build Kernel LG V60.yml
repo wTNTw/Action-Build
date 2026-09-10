@@ -60,41 +60,6 @@ on:
         required: true
         type: boolean
         default: true
-      droid_spaces:
-        description: 'DroidSpaces 轻量 Linux 容器支持：打开即启用下面四个已验证 ABI 中性的细分开关（PID_NS/USER_NS/DEVTMPFS/XT），可正常出可刷入产物。注意：本开关不包含 SYSVIPC/POSIX_MQUEUE，因此容器需以 --ipc=host 运行；要 IPC namespace 请显式打开 ds_sysvipc 或 ds_posix_mqueue，但那会破坏 stock 模块 ABI、被 guard 拒绝'
-        required: true
-        type: boolean
-        default: false
-      ds_pid_ipc_ns:
-        description: 'droid_spaces 细分：NAMESPACES/PID_NS（IPC_NS 依赖 SYSVIPC 或 POSIX_MQUEUE，两者关闭时不生效）。已验证 ABI 中性'
-        required: true
-        type: boolean
-        default: false
-      ds_sysvipc:
-        description: 'droid_spaces 细分：SYSVIPC + SYSVIPC_SYSCTL + SYSVIPC_COMPAT。会破坏 stock ABI（实测 710/1327 符号差异），构建被拒绝；master 开关不会自动打开它'
-        required: true
-        type: boolean
-        default: false
-      ds_posix_mqueue:
-        description: 'droid_spaces 细分：POSIX_MQUEUE + POSIX_MQUEUE_SYSCTL。会破坏 stock ABI（实测 577/1327 符号差异），构建被拒绝；master 开关不会自动打开它'
-        required: true
-        type: boolean
-        default: false
-      ds_user_ns:
-        description: 'droid_spaces 细分：USER_NS（Android 默认关闭，安全敏感）。已验证 ABI 中性'
-        required: true
-        type: boolean
-        default: false
-      ds_devtmpfs:
-        description: 'droid_spaces 细分：DEVTMPFS + DEVTMPFS_MOUNT。已验证 ABI 中性'
-        required: true
-        type: boolean
-        default: false
-      ds_xt:
-        description: 'droid_spaces 细分：NETFILTER_XT_MATCH_RECENT（本内核树没有 NETFILTER_XT_TARGET_REJECT 这个符号，TARGET_LOG 已由 stock 启用，故实际只落地 MATCH_RECENT）。已验证 ABI 中性'
-        required: true
-        type: boolean
-        default: false
       ipv6_nat:
         description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
         required: true
@@ -171,14 +136,7 @@ jobs:
           BUILD_TIME: ${{ inputs.build_time }}
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
-          DROID_SPACES: ${{ inputs.droid_spaces }}
           IPV6_NAT: ${{ inputs.ipv6_nat }}
-          DS_PID_IPC_NS: ${{ inputs.ds_pid_ipc_ns }}
-          DS_SYSVIPC: ${{ inputs.ds_sysvipc }}
-          DS_POSIX_MQUEUE: ${{ inputs.ds_posix_mqueue }}
-          DS_USER_NS: ${{ inputs.ds_user_ns }}
-          DS_DEVTMPFS: ${{ inputs.ds_devtmpfs }}
-          DS_XT: ${{ inputs.ds_xt }}
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"

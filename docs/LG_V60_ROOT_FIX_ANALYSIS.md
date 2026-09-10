@@ -203,7 +203,7 @@ static const char * const fw_path[] = {
 
 - 优点：零风险、零刷写。缺点：失去 IPC 隔离与 SysV IPC。
 - 状态：**设备所有者已确认这是可接受的方案**，因此当前无需任何改动。只有在确实需要独立 IPC namespace 时，才进入 A/C/D。
-- 落地方式：CI 的 `droid_spaces` 主开关已改为只展开上面这四个 ABI 中性开关（不再包含 `SYSVIPC`/`POSIX_MQUEUE`），所以「启用 droid_spaces」就是方案 0 —— 构建能正常出可刷入产物，容器侧配 `--ipc=host`。
+- 落地方式：`droid_spaces` 主开关曾收窄为只展开上面这四个 ABI 中性开关，随后于 2026-09-10 连同全部 `ds_*` 细分开关一起从构建中移除——去掉 `IPC_NS` 之后它已不构成完整特性，留在 workflow 里只会造成「勾了就支持容器」的误解。因此方案 0 现在的含义是**不额外开启任何命名空间相关配置**（stock 自带的 `NAMESPACES` / `UTS_NS` / `NET_NS` 仍在），容器侧配 `--ipc=host`；需要 `PID_NS` / `USER_NS` / `DEVTMPFS` / `NETFILTER_XT_MATCH_RECENT` 时按 `docs/LG_V60_FEATURES_AND_ABI.md` 第五节手动加回（四项均 ABI 中性，加回后 guard 仍会通过）。
 
 ### 方案 A（推荐主路径）：ramdisk 首阶段 `modules.load`
 

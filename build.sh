@@ -109,6 +109,7 @@ KPM_OPTION=${KPM_OPTION:-KPM}
 RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
+IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
@@ -122,6 +123,7 @@ echo "KPM_OPTION: $KPM_OPTION"
 echo "RE_KERNEL: $RE_KERNEL_ENABLE"
 echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
+echo "IPV6_NAT: $IPV6_NAT_ENABLE"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -386,12 +388,37 @@ else
     echo "CCM disabled, using default CUBIC"
 fi
 
-# DROID_SPACES is DISABLED permanently
-# CONFIRMED: DROID_SPACES breaks vendor WiFi/audio drivers
-# Enabling it injects CONFIG_USER_NS, CONFIG_CGROUP_DEVICE, etc.
-# These configs change kernel ABI and break vendor module compatibility
-# DO NOT re-enable without thorough device testing!
-echo "NOTE: DROID_SPACES feature is permanently disabled (breaks WiFi/audio drivers)"
+# ==========================================================
+# DROID_SPACES（保持禁用）
+# ----------------------------------------------------------
+# 2026-09-10 实测确认它确实会破坏 ABI：开启后内核有 710/1327 个符号的 CRC
+# 与官方 ROM 不一致（对照：只开 IPv6 NAT 时为 0/1327）。/vendor 里的 stock
+# 预编译模块绑定的是官方 CRC，于是全部被拒：
+#     <mod>: disagrees about version of symbol module_layout
+# 结果 /proc/modules 为空、WiFi/音频全部消失。
+# 要启用它必须先解决“让设备加载我们自己编译的模块”。
+echo "NOTE: DROID_SPACES is disabled (confirmed ABI-breaking: 710/1327 symbol CRC mismatch)"
+
+# ==========================================================
+# IPv6 NAT / Redirect（已实测 ABI 中性）
+# ----------------------------------------------------------
+# 与官方 ROM 逐符号对照：开启后 0/1327 差异，stock 模块照常加载。
+# 设备实测：IPv6 nat/raw/mangle/filter 表齐全，WiFi 正常，开机无异常。
+# ==========================================================
+if [ "$IPV6_NAT_ENABLE" = "true" ]; then
+    echo "Enabling IPv6 NAT / Redirect support..."
+    scripts/config --file out/.config \
+        -e IP6_NF_NAT \
+        -e NF_NAT_MASQUERADE_IPV6 \
+        -e IP6_NF_TARGET_MASQUERADE \
+        -e IP6_NF_TARGET_REDIRECT \
+        -e IP6_NF_TARGET_NPT \
+        -e NF_TABLES_IPV6 \
+        -e NFT_NAT_IPV6
+    echo "IPv6 NAT enabled: MASQUERADE / REDIRECT / DNAT-SNAT / NPT"
+else
+    echo "IPv6 NAT disabled"
+fi
 
 make $MAKE_ARGS -j$(nproc)
 

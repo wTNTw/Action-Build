@@ -60,6 +60,11 @@ on:
         required: true
         type: boolean
         default: true
+      ipv6_nat:
+        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？已实测 ABI 中性（0/1327 符号差异），默认开启'
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -131,6 +136,7 @@ jobs:
           BUILD_TIME: ${{ inputs.build_time }}
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
+          IPV6_NAT: ${{ inputs.ipv6_nat }}
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"

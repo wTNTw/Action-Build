@@ -540,6 +540,96 @@ if grep -q "CONFIG_MODULES=y" "out/.config"; then
         
         # Set file permissions
         find "$TARGET_KV_DIR" -name "*.ko" -type f -exec chmod 644 {} +
+
+        # ==========================================================
+        # 模块 ABI 校验：module_layout CRC 必须与官方一致
+        # ----------------------------------------------------------
+        # CONFIG_MODVERSIONS=y 时，内核会拿自己的 __crc_module_layout 与模块
+        # __versions 里记录的期望值比较。不一致的模块会被直接拒绝加载：
+        #     <mod>: disagrees about version of symbol module_layout
+        # 结果是 /proc/modules 为空、WiFi/音频全部消失（就是常说的“掉驱动”）。
+        # 官方 /vendor 模块里记录的期望值是固定的 0xd273bd0c。
+        #
+        # 这里用“我们自己编译出来的 .ko”反查内核的 CRC，在打包前就拦住，
+        # 不必等到刷机后才发现。任何改动 struct module 可达类型的配置项
+        # （例如 droid_spaces / ipv6_nat 那一组）都可能触发。
+        # ==========================================================
+        MODCHECK_DIR="$TARGET_KV_DIR" python3 - <<'MODCHECK_PYEOF'
+import glob
+import os
+import struct
+import sys
+
+EXPECTED = "0xd273bd0c"
+root = os.environ["MODCHECK_DIR"]
+paths = sorted(glob.glob(os.path.join(root, "**", "*.ko"), recursive=True), key=len)
+if not paths:
+    print("WARN: no built .ko found, skip module_layout CRC check")
+    sys.exit(0)
+
+path = paths[0]
+d = open(path, "rb").read()
+if d[:4] != b"\x7fELF":
+    print("WARN: %s is not ELF, skip module_layout CRC check" % path)
+    sys.exit(0)
+
+is64 = d[4] == 2
+e_shoff = struct.unpack_from("<Q", d, 0x28)[0] if is64 else struct.unpack_from("<I", d, 0x20)[0]
+e_shentsize = struct.unpack_from("<H", d, 0x3A)[0] if is64 else struct.unpack_from("<H", d, 0x2E)[0]
+e_shnum = struct.unpack_from("<H", d, 0x3C)[0] if is64 else struct.unpack_from("<H", d, 0x30)[0]
+e_shstrndx = struct.unpack_from("<H", d, 0x3E)[0] if is64 else struct.unpack_from("<H", d, 0x32)[0]
+
+
+def section(i):
+    off = e_shoff + i * e_shentsize
+    name = struct.unpack_from("<I", d, off)[0]
+    if is64:
+        _flags, _addr, offset, size = struct.unpack_from("<QQQQ", d, off + 8)
+    else:
+        _flags, _addr, offset, size = struct.unpack_from("<IIII", d, off + 8)
+    return name, offset, size
+
+
+sections = [section(i) for i in range(e_shnum)]
+str_off = sections[e_shstrndx][1]
+
+
+def sname(idx):
+    start = str_off + idx
+    end = d.index(b"\x00", start)
+    return d[start:end].decode("ascii", "replace")
+
+
+# struct modversion_info { unsigned long crc; char name[MODULE_NAME_LEN=56]; }
+ENTRY = 8 + 56
+for name_idx, offset, size in sections:
+    if sname(name_idx) != "__versions":
+        continue
+    for i in range(size // ENTRY):
+        base = offset + i * ENTRY
+        crc = struct.unpack_from("<Q", d, base)[0] & 0xFFFFFFFF
+        sym = d[base + 8: base + 64].split(b"\x00")[0].decode("ascii", "replace")
+        if sym == "module_layout":
+            got = "0x%08x" % crc
+            print("built kernel module_layout CRC = %s (read from %s)" % (got, path))
+            if got != EXPECTED:
+                print("")
+                print("==========================================================")
+                print("BUILD REJECTED: module_layout CRC mismatch")
+                print("  stock /vendor modules expect : %s" % EXPECTED)
+                print("  this kernel's built modules  : %s" % got)
+                print("")
+                print("All stock /vendor modules would refuse to load with:")
+                print("  <mod>: disagrees about version of symbol module_layout")
+                print("=> /proc/modules empty, WiFi and audio gone = pulled drivers.")
+                print("Revert the kernel config change that altered struct module.")
+                print("==========================================================")
+                sys.exit(1)
+            print("OK: module_layout CRC matches the stock /vendor modules")
+            sys.exit(0)
+print("WARN: module_layout not in __versions of %s, skip check" % path)
+sys.exit(0)
+MODCHECK_PYEOF
         
         # Genrate modules.dep
         echo "Injecting verified stock modules.dep layout..."

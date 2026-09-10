@@ -136,6 +136,123 @@ if [ $KSU_ENABLE -eq 1 ]; then
     if [ -n "$GITHUB_ENV" ]; then
         echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
     fi
+
+    # ==========================================================
+    # Android 16 boot fix: scope the su-session driver fd
+    # ----------------------------------------------------------
+    # ReSukiSU installs the [ksu_driver_su] anon-inode fd from the
+    # bprm_committed_creds LSM hook. That hook runs for EVERY exec because
+    # this kernel's fs/exec.c has no post-exec hook, so KSU defines
+    # KSU_COMPAT_NO_POST_EXECVE_HOOK. The only guard in the source is
+    # CONFIG_KSU_MANUAL_HOOK, which is NOT set when the KSU_SUSFS hook mode
+    # is used, so fd 3 ends up in every process, zygote64 included.
+    #
+    # Android 16 validates every fd of Zygote's FileDescriptorTable at
+    # forkSystemServer time and aborts on that anon inode, whose i_mode
+    # carries no S_IFMT type bits:
+    #   JNI FatalError called: (system_server) Unsupported st_mode for FD 3: Unknown
+    # Result: zygote crash-loops, system_server never starts and the device
+    # hangs on the boot animation.
+    #
+    # Fix: enable the existing TIF_PROC_IN_KSU_EXECVE guard for the SUSFS hook
+    # mode too, so only the thread that exec'd su (rewritten to ksud) receives
+    # the scoped su-session fd. Bit 61 is free here: this kernel uses TIF bits
+    # 0-26, SUSFS uses 33-35 and KSU uses 63.
+    # ==========================================================
+    echo "Applying Android 16 su-session fd scope fix..."
+    python3 - <<'KSU_FD_SCOPE_PATCH'
+import pathlib
+import sys
+
+EDITS = [
+    (
+        "sucompat.h: define TIF_PROC_IN_KSU_EXECVE for the SUSFS hook mode",
+        "KernelSU/kernel/feature/sucompat.h",
+        """#define ksu_clear_current_proc_unprivillege susfs_clear_current_proc_no_su
+#else // manual hook""",
+        """#define ksu_clear_current_proc_unprivillege susfs_clear_current_proc_no_su
+
+// Spare arm64 TIF bits here are 27-62: the kernel itself uses 0-26, SUSFS uses
+// 33-35 and KSU uses 63 for TIF_KSU_DISABLE_ESCAPE_WITH_ROOT.
+// This flag records that the current thread exec'd su and was rewritten to ksud,
+// so that only that process receives the scoped su-session driver fd.
+#ifdef CONFIG_64BIT
+#define TIF_PROC_IN_KSU_EXECVE 61
+#else
+#define TIF_PROC_IN_KSU_EXECVE 29
+#endif
+#else // manual hook""",
+    ),
+    (
+        "sucompat.c: set the flag when su is rewritten to ksud",
+        "KernelSU/kernel/feature/sucompat.c",
+        """#ifdef CONFIG_KSU_MANUAL_HOOK
+    // flag for post execve hook, mostly: bprm_committed_creds LSM hooks
+    // no need care in susfs, susfs completed everything
+    set_thread_flag(TIF_PROC_IN_KSU_EXECVE);
+#endif""",
+        """#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+    // flag for post execve hook, mostly: bprm_committed_creds LSM hooks
+    // Remember that this thread exec'd su and was rewritten to ksud, so only
+    // this process may receive the scoped su-session fd afterwards.
+    set_thread_flag(TIF_PROC_IN_KSU_EXECVE);
+#endif""",
+    ),
+    (
+        "sucompat.c: only install the scoped fd for that process",
+        "KernelSU/kernel/feature/sucompat.c",
+        """int ksu_handle_post_execve(int *fd, const char *filename, void *argv, void *envp, int *flags, int *retval)
+{
+#ifdef CONFIG_KSU_MANUAL_HOOK
+    if (likely(!test_thread_flag(TIF_PROC_IN_KSU_EXECVE))) {
+        return -EINVAL;
+    }
+#endif""",
+        """int ksu_handle_post_execve(int *fd, const char *filename, void *argv, void *envp, int *flags, int *retval)
+{
+#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+    // bprm_committed_creds runs for every exec. Only the process that just
+    // exec'd su -> ksud may hold the scoped su-session fd; every other process
+    // must keep fd 3 free, because Android 16 zygote validates all fds when it
+    // forks system_server and aborts on this anon inode's st_mode.
+    if (likely(!test_thread_flag(TIF_PROC_IN_KSU_EXECVE))) {
+        return -EINVAL;
+    }
+#endif""",
+    ),
+]
+
+
+root = pathlib.Path(".")
+sources = {}
+
+for name, rel, old, new in EDITS:
+    path = root / rel
+    if not path.is_file():
+        print("error: %s not found" % path, file=sys.stderr)
+        sys.exit(1)
+
+    if rel not in sources:
+        sources[rel] = path.read_text(encoding="utf-8")
+    src = sources[rel]
+
+    if new in src:
+        print("already applied: %s" % name)
+        continue
+
+    count = src.count(old)
+    if count != 1:
+        print("error: anchor for '%s' matched %d times (expected 1) in %s" % (name, count, rel), file=sys.stderr)
+        sys.exit(1)
+
+    sources[rel] = src.replace(old, new, 1)
+    print("applied: %s" % name)
+
+for rel, src in sources.items():
+    (root / rel).write_text(src, encoding="utf-8")
+
+print("Android 16 su-session fd scope fix applied")
+KSU_FD_SCOPE_PATCH
 else
     echo "KSU is disabled"
 fi

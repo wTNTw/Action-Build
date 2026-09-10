@@ -171,6 +171,119 @@ jobs:
             echo "custom version tag: $KSU_CUSTOM_TAG"
           fi
 
+      - name: Fix KSU su-session fd scope (Android 16 boot)
+        working-directory: kernel
+        run: |
+          # ------------------------------------------------------------
+          # ReSukiSU 从 bprm_committed_creds LSM 钩子给每个 exec 的进程安装
+          # [ksu_driver_su] 匿名 inode fd（fd 3）。源码里唯一的保护是
+          # CONFIG_KSU_MANUAL_HOOK，而本流程用 KSU_SUSFS hook 模式（Kconfig 里
+          # TRACEPOINT/MANUAL/SUSFS 三者互斥），保护被编译掉，fd 3 因此落到每一个
+          # 进程，包括 zygote64。
+          #
+          # Android 16 的 zygote 在 forkSystemServer 时校验所有 fd 的 st_mode，
+          # 该匿名 inode 没有 S_IFMT 类型位，直接 abort：
+          #   JNI FatalError called: (system_server) Unsupported st_mode for FD 3: Unknown
+          # 结果 zygote 崩溃循环、system_server 起不来、卡在开机动画。
+          #
+          # 修复：为 SUSFS 模式补上 TIF_PROC_IN_KSU_EXECVE（arm64 bit 61，本内核空闲：
+          # 内核自身用 0-26、SUSFS 用 33-35、KSU 用 63），让只有执行过 su -> ksud
+          # 的线程拿到该 scoped fd。
+          # ------------------------------------------------------------
+          python3 - <<'KSU_FD_SCOPE_PATCH'
+          import pathlib
+          import sys
+
+          EDITS = [
+              (
+                  "sucompat.h: define TIF_PROC_IN_KSU_EXECVE for the SUSFS hook mode",
+                  "KernelSU/kernel/feature/sucompat.h",
+                  """#define ksu_clear_current_proc_unprivillege susfs_clear_current_proc_no_su
+          #else // manual hook""",
+                  """#define ksu_clear_current_proc_unprivillege susfs_clear_current_proc_no_su
+
+          // Spare arm64 TIF bits here are 27-62: the kernel itself uses 0-26, SUSFS uses
+          // 33-35 and KSU uses 63 for TIF_KSU_DISABLE_ESCAPE_WITH_ROOT.
+          // This flag records that the current thread exec'd su and was rewritten to ksud,
+          // so that only that process receives the scoped su-session driver fd.
+          #ifdef CONFIG_64BIT
+          #define TIF_PROC_IN_KSU_EXECVE 61
+          #else
+          #define TIF_PROC_IN_KSU_EXECVE 29
+          #endif
+          #else // manual hook""",
+              ),
+              (
+                  "sucompat.c: set the flag when su is rewritten to ksud",
+                  "KernelSU/kernel/feature/sucompat.c",
+                  """#ifdef CONFIG_KSU_MANUAL_HOOK
+              // flag for post execve hook, mostly: bprm_committed_creds LSM hooks
+              // no need care in susfs, susfs completed everything
+              set_thread_flag(TIF_PROC_IN_KSU_EXECVE);
+          #endif""",
+                  """#if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+              // flag for post execve hook, mostly: bprm_committed_creds LSM hooks
+              // Remember that this thread exec'd su and was rewritten to ksud, so only
+              // this process may receive the scoped su-session fd afterwards.
+              set_thread_flag(TIF_PROC_IN_KSU_EXECVE);
+          #endif""",
+              ),
+              (
+                  "sucompat.c: only install the scoped fd for that process",
+                  "KernelSU/kernel/feature/sucompat.c",
+                  """int ksu_handle_post_execve(int *fd, const char *filename, void *argv, void *envp, int *flags, int *retval)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+              if (likely(!test_thread_flag(TIF_PROC_IN_KSU_EXECVE))) {
+                  return -EINVAL;
+              }
+          #endif""",
+                  """int ksu_handle_post_execve(int *fd, const char *filename, void *argv, void *envp, int *flags, int *retval)
+          {
+          #if defined(CONFIG_KSU_SUSFS) || defined(CONFIG_KSU_MANUAL_HOOK)
+              // bprm_committed_creds runs for every exec. Only the process that just
+              // exec'd su -> ksud may hold the scoped su-session fd; every other process
+              // must keep fd 3 free, because Android 16 zygote validates all fds when it
+              // forks system_server and aborts on this anon inode's st_mode.
+              if (likely(!test_thread_flag(TIF_PROC_IN_KSU_EXECVE))) {
+                  return -EINVAL;
+              }
+          #endif""",
+              ),
+          ]
+
+
+          root = pathlib.Path(".")
+          sources = {}
+
+          for name, rel, old, new in EDITS:
+              path = root / rel
+              if not path.is_file():
+                  print("error: %s not found" % path, file=sys.stderr)
+                  sys.exit(1)
+
+              if rel not in sources:
+                  sources[rel] = path.read_text(encoding="utf-8")
+              src = sources[rel]
+
+              if new in src:
+                  print("already applied: %s" % name)
+                  continue
+
+              count = src.count(old)
+              if count != 1:
+                  print("error: anchor for '%s' matched %d times (expected 1) in %s" % (name, count, rel), file=sys.stderr)
+                  sys.exit(1)
+
+              sources[rel] = src.replace(old, new, 1)
+              print("applied: %s" % name)
+
+          for rel, src in sources.items():
+              (root / rel).write_text(src, encoding="utf-8")
+
+          print("Android 16 su-session fd scope fix applied")
+          KSU_FD_SCOPE_PATCH
+
       - name: Configure Kernel
         working-directory: kernel
         env:
@@ -276,38 +389,40 @@ jobs:
 
           grep -E "CONFIG_KSU|CONFIG_KSU_SUSFS|CONFIG_KPM|CONFIG_ZRAM|CONFIG_USER_NS|CONFIG_NAMESPACES|CONFIG_IP_SET|CONFIG_NETFILTER_XT_MATCH_ADDRTYPE" out/.config
 
-      - name: Force Vermagic Match Stock Kernel
+      - name: Pin Kernel Release To Stock String
         working-directory: kernel
         run: |
-          # ============================================================
-          # 强制内核 vermagic 与官方内核一致
-          # 官方: 4.19.325-cip133-st17-perf-g29902cf733dc
-          # /vendor/lib/modules 里的 WiFi/音频模块绑定该字符串，
-          # 不一致会导致模块加载失败（掉驱动 / 卡开机动画）。
+          # ------------------------------------------------------------
+          # 官方内核 release: 4.19.325-cip133-st17-perf-g29902cf733dc
           #
-          # 版本组成:
-          #   4.19.325              <- Makefile VERSION.PATCHLEVEL.SUBLEVEL
-          #   -cip133               <- localversion-cip
-          #   -st17                 <- localversion-st
-          #   -perf-g29902cf733dc  <- 官方 CONFIG_LOCALVERSION + git describe
+          # 注意：release 段并不决定模块能否加载。CONFIG_MODVERSIONS=y 时
+          # kernel/module.c 的 same_magic() 会跳过第一个空格之前的内容，只比较
+          # flags（SMP preempt mod_unload modversions aarch64），真正把关的是符号
+          # CRC。设备实测：vermagic 仍带 -cip133-st17-perf-g29902cf733dc 的 /vendor
+          # 模块，在 release 只有 4.19.325 的内核上 insmod 返回 0。
+          # 所以这里只是让 uname -r 与官方一致（部分 ROM 组件/App 会看这个）。
           #
-          # CONFIG_MODVERSIONS 保持不动：官方模块带 modversions 标志，
-          # 关掉会导致 vermagic flags 不匹配。
-          # ============================================================
+          # scripts/setlocalversion 才是拼接 localversion 的地方（脚本自身
+          # ${CONFIG_LOCALVERSION}${LOCALVERSION} 一行），它还会追加 -g<hash> /
+          # -dirty。所以给它固定输出，而不是依赖 localversion* 文件与 git describe。
+          # CONFIG_MODVERSIONS 保持不动：必须与官方模块的 flags 一致。
+          # ------------------------------------------------------------
           echo "=========================================="
-          echo "Forcing vermagic to match stock kernel"
+          echo "Pinning kernel release to the stock one"
           echo "Target: 4.19.325-cip133-st17-perf-g29902cf733dc"
           echo "=========================================="
           rm -f localversion localversion-cip localversion-st
-          scripts/config --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-cip133-st17-perf-g29902cf733dc" \
-            --disable CONFIG_LOCALVERSION_AUTO
+          scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "" --disable CONFIG_LOCALVERSION_AUTO
           if [ -f scripts/setlocalversion ] && [ ! -f scripts/setlocalversion.orig ]; then
             cp scripts/setlocalversion scripts/setlocalversion.orig
-            printf '#!/bin/sh\n# forced empty to match stock vermagic\nexit 0\n' > scripts/setlocalversion
-            chmod +x scripts/setlocalversion
           fi
-          echo "OK: localversion forced"
+          cat > scripts/setlocalversion <<'SLVEOF'
+          #!/bin/sh
+          # Fixed output so KERNELRELEASE matches the stock release exactly
+          echo "-cip133-st17-perf-g29902cf733dc"
+          SLVEOF
+          chmod +x scripts/setlocalversion
+          echo "OK: kernel release pinned to 4.19.325-cip133-st17-perf-g29902cf733dc"
 
       - name: Build Kernel
         working-directory: kernel

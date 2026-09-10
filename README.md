@@ -97,6 +97,8 @@
 
 - 新增[`docs/LG_V60_FEATURES_AND_ABI.md`](docs/LG_V60_FEATURES_AND_ABI.md)：LG V60 特性开关的构建期 ABI 全量对照记录，列明哪些 `ds_*` 开关可安全打开、哪些会破坏 stock 模块 ABI
  
+- 新增[`docs/LG_V60_ROOT_FIX_ANALYSIS.md`](docs/LG_V60_ROOT_FIX_ANALYSIS.md)：LG V60 模块 ABI 约束的根治方案（让设备加载自编模块：ramdisk `modules.load` / KSU 覆盖 / vendor 镜像重写），含零设备改动的固件时序预检结论；当前配置无需改动，本文是将来必须用 IPC namespace 时的实施蓝图
+ 
 - 新增`FakeConfig(HideConfig)`，用于隐藏`proc/config.gz`内配置项可见性  
 ```
 普通配置项:

@@ -270,40 +270,47 @@ echo "Building Kernel......"
 make $MAKE_ARGS ${TARGET_DEVICE}_defconfig
 
 # ==========================================================
-# Force kernel vermagic to match stock vendor modules
+# Pin the kernel release string to the stock one
 # ----------------------------------------------------------
-# Stock LineageOS kernel vermagic:
+# Stock LineageOS/Axion kernel release:
 #   4.19.325-cip133-st17-perf-g29902cf733dc
-# The WiFi/audio modules in /vendor/lib/modules/ are bound to this
-# exact string. Version is composed of:
-#   4.19.325              <- Makefile (VERSION.PATCHLEVEL.SUBLEVEL)
-#   -cip133               <- localversion-cip file
-#   -st17                 <- localversion-st file
-#   -perf-g29902cf733dc  <- stock CONFIG_LOCALVERSION + git describe
-# So: remove localversion files, put the full suffix into
-# CONFIG_LOCALVERSION, and stop scripts/setlocalversion from
-# appending git hash / "-dirty".
-# CONFIG_MODVERSIONS is intentionally left untouched (must match
-# stock flags, otherwise vermagic flags mismatch).
+# composed of 4.19.325 (Makefile VERSION.PATCHLEVEL.SUBLEVEL) plus the
+# localversion suffix below.
+#
+# NOTE: this release part is NOT what gates module loading. With
+# CONFIG_MODVERSIONS=y the kernel's same_magic() skips everything up to
+# the first space when the module carries symbol CRCs, so only the flags
+# (SMP preempt mod_unload modversions aarch64) and the CRCs are compared.
+# Verified on device: modules whose vermagic carries
+# "-cip133-st17-perf-g29902cf733dc" load fine into a kernel built without
+# it. Pinning the string is only about reporting the same release as the
+# stock kernel, which some ROM components and apps inspect.
+#
+# scripts/setlocalversion is the only place that appends the localversion
+# (see its own ${CONFIG_LOCALVERSION}${LOCALVERSION} line), and it would
+# also append "-g<our-sha>" / "-dirty". So give it a fixed output instead
+# of relying on localversion* files and git describe.
+# CONFIG_MODVERSIONS is intentionally left untouched: it must stay in sync
+# with the stock module flags.
 # ==========================================================
 echo "=========================================="
-echo "Forcing kernel vermagic to match stock kernel"
+echo "Pinning kernel release to the stock one"
 echo "Target: 4.19.325-cip133-st17-perf-g29902cf733dc"
 echo "=========================================="
 
 rm -f localversion localversion-cip localversion-st
 
 scripts/config --file out/.config \
-    --set-str CONFIG_LOCALVERSION "-cip133-st17-perf-g29902cf733dc" \
+    --set-str CONFIG_LOCALVERSION "" \
     --disable CONFIG_LOCALVERSION_AUTO
 
 if [ -f scripts/setlocalversion ] && [ ! -f scripts/setlocalversion.orig ]; then
     cp scripts/setlocalversion scripts/setlocalversion.orig
-    printf '#!/bin/sh\n# Forced empty so KERNELRELEASE exactly matches stock vermagic\nexit 0\n' > scripts/setlocalversion
+    printf '#!/bin/sh\n# Fixed output so KERNELRELEASE matches the stock release exactly\necho "-cip133-st17-perf-g29902cf733dc"\n' > scripts/setlocalversion
     chmod +x scripts/setlocalversion
 fi
 
-echo "Localversion forced to: -cip133-st17-perf-g29902cf733dc"
+echo "Kernel release pinned to: 4.19.325-cip133-st17-perf-g29902cf733dc"
 echo ""
 
 if [ $KSU_ENABLE -eq 1 ]; then

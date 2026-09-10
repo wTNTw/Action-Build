@@ -109,6 +109,8 @@ KPM_OPTION=${KPM_OPTION:-KPM}
 RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
+DROID_SPACES_ENABLE=${DROID_SPACES:-false}
+IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
@@ -122,6 +124,8 @@ echo "KPM_OPTION: $KPM_OPTION"
 echo "RE_KERNEL: $RE_KERNEL_ENABLE"
 echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
+echo "DROID_SPACES: $DROID_SPACES_ENABLE"
+echo "IPV6_NAT: $IPV6_NAT_ENABLE"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -386,12 +390,70 @@ else
     echo "CCM disabled, using default CUBIC"
 fi
 
-# DROID_SPACES is DISABLED permanently
-# CONFIRMED: DROID_SPACES breaks vendor WiFi/audio drivers
-# Enabling it injects CONFIG_USER_NS, CONFIG_CGROUP_DEVICE, etc.
-# These configs change kernel ABI and break vendor module compatibility
-# DO NOT re-enable without thorough device testing!
-echo "NOTE: DROID_SPACES feature is permanently disabled (breaks WiFi/audio drivers)"
+# ==========================================================
+# DROID_SPACES (optional, default off) - 轻量 Linux 容器支持
+# ----------------------------------------------------------
+# 背景：早期结论认为它会“掉驱动”（commit da72d21 / 36859d0 时期）。
+# 但那些测试发生在内核根本没能正常开机的阶段 —— Android 16 的
+# KSU su-session fd bug 会让 zygote 崩溃循环、卡在开机动画，框架起不来，
+# WiFi/音频自然不可用，看起来就像“驱动掉了”。
+#
+# 实测对照（可用基线，2026-09-10）：当前内核与 stock 已有 41 项新增 +
+# 11 项取值不同的配置差异（KSU/SUSFS/REKERNEL + CCM 的 TCP_CONG_ADVANCED/BBR、
+# NET_SCH_FQ 等），34 个 /vendor 模块仍全部加载成功、0 条 CRC/version magic 错误。
+# 真正会打断 vendor 预编译模块的是 CONFIG_MODVERSIONS 的 CRC 校验
+# （尤其 module_layout ← struct module 布局），而影响 struct module 的选项
+# （MODULE_UNLOAD/KALLSYMS/TRACEPOINTS/EVENT_TRACING/JUMP_LABEL/CFI_CLANG/
+# TREE_SRCU 等）我们与 stock 逐项一致，droid_spaces 选项集也不涉及它们。
+#
+# 刷入后请验证：
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "SYSVIPC|USER_NS|PID_NS"'
+#   adb shell su -c 'wc -l /proc/modules'          # 期望 34
+#   adb logcat -b kernel -d | grep -icE "disagrees about version|Unknown symbol"  # 期望 0
+#   adb shell 'cmd wifi status | head -3'          # 期望 connected
+#   adb shell getprop sys.boot_completed           # 期望 1
+# ==========================================================
+if [ "$DROID_SPACES_ENABLE" = "true" ]; then
+    echo "Enabling DROID_SPACES (lightweight Linux container support)..."
+    scripts/config --file out/.config \
+        -e SYSVIPC \
+        -e DEVTMPFS \
+        -e PID_NS \
+        -e IPC_NS \
+        -e USER_NS \
+        -e NAMESPACES \
+        -e POSIX_MQUEUE \
+        -e NETFILTER_XT_TARGET_REJECT \
+        -e NETFILTER_XT_TARGET_LOG \
+        -e NETFILTER_XT_MATCH_RECENT
+    echo "DROID_SPACES enabled: SYSVIPC/DEVTMPFS/PID_NS/IPC_NS/USER_NS/NAMESPACES/POSIX_MQUEUE"
+else
+    echo "DROID_SPACES disabled (default)"
+fi
+
+# ==========================================================
+# IPv6 NAT (optional, default off)
+# ----------------------------------------------------------
+# 与 SukiSU-Ultra 分支 workflow 里 NETFILTER 组中的 IPv6 NAT 部分保持一致，
+# 使两个分支的该特性定义相同。IP6_NF_NAT 是开关，其余目标选项依赖它，
+# 同一次 scripts/config 调用里一起写进 .config 后由 kconfig 解析生效。
+# 刷入后验证：
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "IP6_NF_NAT|NFT_NAT_IPV6"'
+# ==========================================================
+if [ "$IPV6_NAT_ENABLE" = "true" ]; then
+    echo "Enabling IPv6 NAT / Redirect support..."
+    scripts/config --file out/.config \
+        -e IP6_NF_NAT \
+        -e NF_NAT_MASQUERADE_IPV6 \
+        -e IP6_NF_TARGET_MASQUERADE \
+        -e IP6_NF_TARGET_REDIRECT \
+        -e IP6_NF_TARGET_NPT \
+        -e NF_TABLES_IPV6 \
+        -e NFT_NAT_IPV6
+    echo "IPv6 NAT enabled: MASQUERADE / REDIRECT / DNAT-SNAT / NPT"
+else
+    echo "IPv6 NAT disabled (default)"
+fi
 
 make $MAKE_ARGS -j$(nproc)
 

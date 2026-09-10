@@ -60,6 +60,16 @@ on:
         required: true
         type: boolean
         default: true
+      droid_spaces:
+        description: 'DroidSpaces 轻量 Linux 容器支持 (SYSVIPC/NAMESPACES/USER_NS 等)？默认关闭，需刷入后自行验证'
+        required: true
+        type: boolean
+        default: false
+      ipv6_nat:
+        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -131,6 +141,8 @@ jobs:
           BUILD_TIME: ${{ inputs.build_time }}
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
+          DROID_SPACES: ${{ inputs.droid_spaces }}
+          IPV6_NAT: ${{ inputs.ipv6_nat }}
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"

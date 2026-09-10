@@ -152,6 +152,43 @@ echo "Building Kernel......"
 
 make $MAKE_ARGS ${TARGET_DEVICE}_defconfig
 
+# ==========================================================
+# Force kernel vermagic to match stock vendor modules
+# ----------------------------------------------------------
+# Stock LineageOS kernel vermagic:
+#   4.19.325-cip133-st17-perf-g29902cf733dc
+# The WiFi/audio modules in /vendor/lib/modules/ are bound to this
+# exact string. Version is composed of:
+#   4.19.325              <- Makefile (VERSION.PATCHLEVEL.SUBLEVEL)
+#   -cip133               <- localversion-cip file
+#   -st17                 <- localversion-st file
+#   -perf-g29902cf733dc  <- stock CONFIG_LOCALVERSION + git describe
+# So: remove localversion files, put the full suffix into
+# CONFIG_LOCALVERSION, and stop scripts/setlocalversion from
+# appending git hash / "-dirty".
+# CONFIG_MODVERSIONS is intentionally left untouched (must match
+# stock flags, otherwise vermagic flags mismatch).
+# ==========================================================
+echo "=========================================="
+echo "Forcing kernel vermagic to match stock kernel"
+echo "Target: 4.19.325-cip133-st17-perf-g29902cf733dc"
+echo "=========================================="
+
+rm -f localversion localversion-cip localversion-st
+
+scripts/config --file out/.config \
+    --set-str CONFIG_LOCALVERSION "-cip133-st17-perf-g29902cf733dc" \
+    --disable CONFIG_LOCALVERSION_AUTO
+
+if [ -f scripts/setlocalversion ] && [ ! -f scripts/setlocalversion.orig ]; then
+    cp scripts/setlocalversion scripts/setlocalversion.orig
+    printf '#!/bin/sh\n# Forced empty so KERNELRELEASE exactly matches stock vermagic\nexit 0\n' > scripts/setlocalversion
+    chmod +x scripts/setlocalversion
+fi
+
+echo "Localversion forced to: -cip133-st17-perf-g29902cf733dc"
+echo ""
+
 if [ $KSU_ENABLE -eq 1 ]; then
     scripts/config --file out/.config \
         -e KSU \
@@ -368,7 +405,21 @@ EOF
         echo "Copying Modules into AnyKernel modules directory..."
         cp -r "$TARGET_KV_DIR"/* anykernel/modules/vendor/lib/modules/
         chmod 644 anykernel/modules/vendor/lib/modules/*
-        
+
+        # Also place modules into boot ramdisk /lib/modules.
+        # AnyKernel3 repack_ramdisk() packs $AKHOME/ramdisk/ into the new
+        # boot ramdisk, so the kernel can load modules that were compiled
+        # together with it (guaranteed matching vermagic + MODVERSIONS CRC).
+        echo "Placing Modules into boot ramdisk /lib/modules..."
+        mkdir -p anykernel/ramdisk/lib/modules
+        cp -f "$TARGET_KV_DIR"/*.ko anykernel/ramdisk/lib/modules/ 2>/dev/null || true
+        chmod 644 anykernel/ramdisk/lib/modules/*.ko 2>/dev/null || true
+        if [ -f "$TARGET_KV_DIR/modules.dep" ]; then
+            sed 's|/vendor/lib/modules/||g' "$TARGET_KV_DIR/modules.dep" > anykernel/ramdisk/lib/modules/modules.dep 2>/dev/null || true
+        fi
+        cp -f "$TARGET_KV_DIR/modules.alias" "$TARGET_KV_DIR/modules.softdep" anykernel/ramdisk/lib/modules/ 2>/dev/null || true
+        echo "Ramdisk modules: $(ls anykernel/ramdisk/lib/modules/*.ko 2>/dev/null | wc -l)"
+
         echo "Modules Copied Successfully"
     fi
 fi

@@ -94,6 +94,8 @@
  
 # 更新日志
 >小的更新内容将被忽略 更多内容请参看提交
+
+- 新增[`docs/LG_V60_FEATURES_AND_ABI.md`](docs/LG_V60_FEATURES_AND_ABI.md)：LG V60 特性开关的构建期 ABI 全量对照记录，列明哪些 `ds_*` 开关可安全打开、哪些会破坏 stock 模块 ABI
  
 - 新增`FakeConfig(HideConfig)`，用于隐藏`proc/config.gz`内配置项可见性  
 ```

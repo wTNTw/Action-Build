@@ -61,37 +61,37 @@ on:
         type: boolean
         default: true
       droid_spaces:
-        description: 'DroidSpaces 轻量 Linux 容器支持 (SYSVIPC/NAMESPACES/USER_NS 等)？默认关闭，需刷入后自行验证'
+        description: 'DroidSpaces 轻量 Linux 容器支持：一次打开全部细分开关。注意其中 SYSVIPC 会破坏 stock 模块 ABI，本开关打开后构建一定被 guard 拒绝、不产出镜像；要拿可刷入产物请改用下面已验证 ABI 中性的 ds_* 细分开关（见 docs/LG_V60_FEATURES_AND_ABI.md）'
         required: true
         type: boolean
         default: false
       ds_pid_ipc_ns:
-        description: 'droid_spaces 细分：NAMESPACES/PID_NS/IPC_NS'
+        description: 'droid_spaces 细分：NAMESPACES/PID_NS（IPC_NS 依赖 SYSVIPC 或 POSIX_MQUEUE，两者关闭时不生效）。已验证 ABI 中性'
         required: true
         type: boolean
         default: false
       ds_sysvipc:
-        description: 'droid_spaces 细分：SYSVIPC + SYSVIPC_SYSCTL + SYSVIPC_COMPAT'
+        description: 'droid_spaces 细分：SYSVIPC + SYSVIPC_SYSCTL + SYSVIPC_COMPAT。会破坏 stock ABI（实测 710/1327 符号差异），构建被拒绝'
         required: true
         type: boolean
         default: false
       ds_posix_mqueue:
-        description: 'droid_spaces 细分：POSIX_MQUEUE + POSIX_MQUEUE_SYSCTL'
+        description: 'droid_spaces 细分：POSIX_MQUEUE + POSIX_MQUEUE_SYSCTL。会破坏 stock ABI（实测 577/1327 符号差异），构建被拒绝'
         required: true
         type: boolean
         default: false
       ds_user_ns:
-        description: 'droid_spaces 细分：USER_NS（Android 默认关闭，安全敏感）'
+        description: 'droid_spaces 细分：USER_NS（Android 默认关闭，安全敏感）。已验证 ABI 中性'
         required: true
         type: boolean
         default: false
       ds_devtmpfs:
-        description: 'droid_spaces 细分：DEVTMPFS + DEVTMPFS_MOUNT'
+        description: 'droid_spaces 细分：DEVTMPFS + DEVTMPFS_MOUNT。已验证 ABI 中性'
         required: true
         type: boolean
         default: false
       ds_xt:
-        description: 'droid_spaces 细分：NETFILTER_XT_TARGET_REJECT/LOG + MATCH_RECENT'
+        description: 'droid_spaces 细分：NETFILTER_XT_MATCH_RECENT（本内核树没有 NETFILTER_XT_TARGET_REJECT 这个符号，TARGET_LOG 已由 stock 启用，故实际只落地 MATCH_RECENT）。已验证 ABI 中性'
         required: true
         type: boolean
         default: false

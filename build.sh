@@ -403,27 +403,37 @@ fi
 # ==========================================================
 # DROID_SPACES (optional, default off) - 轻量 Linux 容器支持
 # ----------------------------------------------------------
-# 背景：早期结论认为它会“掉驱动”（commit da72d21 / 36859d0 时期）。
-# 但那些测试发生在内核根本没能正常开机的阶段 —— Android 16 的
-# KSU su-session fd bug 会让 zygote 崩溃循环、卡在开机动画，框架起不来，
-# WiFi/音频自然不可用，看起来就像“驱动掉了”。
+# 实测结论（2026-09-10，构建期全量 ABI 对照，基线 = 1327 个 stock 符号）：
 #
-# 实测对照（可用基线，2026-09-10）：当前内核与 stock 已有 41 项新增 +
-# 11 项取值不同的配置差异（KSU/SUSFS/REKERNEL + CCM 的 TCP_CONG_ADVANCED/BBR、
-# NET_SCH_FQ 等），34 个 /vendor 模块仍全部加载成功、0 条 CRC/version magic 错误。
-# 真正会打断 vendor 预编译模块的是 CONFIG_MODVERSIONS 的 CRC 校验
-# （尤其 module_layout ← struct module 布局），而影响 struct module 的选项
-# （MODULE_UNLOAD/KALLSYMS/TRACEPOINTS/EVENT_TRACING/JUMP_LABEL/CFI_CLANG/
-# TREE_SRCU 等）我们与 stock 逐项一致，droid_spaces 选项集也不涉及它们。
+#   已验证 ABI 中性（0 / 1327，已刷机验证）：
+#     ds_pid_ipc_ns   ds_user_ns   ds_devtmpfs   ds_xt
+#   会破坏 ABI、被 guard 拒绝：
+#     ds_sysvipc       -> 710 / 1327
+#     ds_posix_mqueue  -> 577 / 1327
+#     因此 master 开关 DROID_SPACES=true（全开）一定是 710 / 1327，拿不到产物。
+#
+# 机制：SYSVIPC 或 POSIX_MQUEUE 任一打开都会让 IPC_NS 自动变 y
+#   （init/Kconfig: depends on (SYSVIPC || POSIX_MQUEUE)，且 default y），
+#   于是 struct nsproxy 增加 ipc_ns、struct task_struct 增加 sysv_sem/sysv_shm，
+#   genksyms 递归展开后数百个导出符号 CRC 变化，stock /vendor 模块拒绝加载。
+#   这也不是“放宽校验”能解决的：字段偏移会整体位移，绕过 CRC 等于把 vendor
+#   模块绑到语义已变的类型上。
+#
+# 结果：在必须继续加载 stock /vendor 模块的前提下，IPC namespace 拿不到，
+#   容器需以 --ipc=host 语义运行。完整实验矩阵、差异符号与后续选项见
+#   docs/LG_V60_FEATURES_AND_ABI.md
 #
 # 刷入后请验证：
-#   adb shell su -c 'zcat /proc/config.gz | grep -E "SYSVIPC|USER_NS|PID_NS"'
+#   adb shell su -c 'zcat /proc/config.gz | grep -E "SYSVIPC|USER_NS|PID_NS|DEVTMPFS"'
 #   adb shell su -c 'wc -l /proc/modules'          # 期望 34
-#   adb logcat -b kernel -d | grep -icE "disagrees about version|Unknown symbol"  # 期望 0
+#   adb shell su -c 'dmesg | grep -ic "disagrees about version"'  # 期望 0
 #   adb shell 'cmd wifi status | head -3'          # 期望 connected
 #   adb shell getprop sys.boot_completed           # 期望 1
+#   adb shell su -c 'ls /proc/self/ns/'            # 缺 ipc 属预期（见上）
 # ==========================================================
-# master 开关：打开即启用全部细分项
+# master 开关：打开即启用全部细分项。
+# 警告：其中 SYSVIPC 会破坏 stock ABI，所以本开关打开后构建一定被 guard 拒绝；
+# 要拿可刷入的产物请只用上面已验证 ABI 中性的细分开关。
 if [ "$DROID_SPACES_ENABLE" = "true" ]; then
     DS_PID_IPC_NS_ENABLE=true
     DS_SYSVIPC_ENABLE=true
@@ -437,6 +447,8 @@ DS_ANY=false
 
 if [ "$DS_PID_IPC_NS_ENABLE" = "true" ]; then
     DS_ANY=true
+    # IPC_NS 依赖 (SYSVIPC || POSIX_MQUEUE)：两者都关时该符号不产生 .config
+    # 条目，此处 -e IPC_NS 是空操作（见 docs/LG_V60_FEATURES_AND_ABI.md 第五节）。
     echo "ds_pid_ipc_ns -> NAMESPACES PID_NS IPC_NS"
     scripts/config --file out/.config -e NAMESPACES -e PID_NS -e IPC_NS
 fi
@@ -467,7 +479,11 @@ fi
 
 if [ "$DS_XT_ENABLE" = "true" ]; then
     DS_ANY=true
-    echo "ds_xt -> NETFILTER_XT_TARGET_REJECT NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT"
+    # 注意：本内核树的 net/netfilter/Kconfig 中没有 NETFILTER_XT_TARGET_REJECT
+    # 条目，该 -e 是空操作（REJECT 以 IP_NF_TARGET_REJECT / IP6_NF_TARGET_REJECT
+    # 形式存在，stock 本就为 y）；NETFILTER_XT_TARGET_LOG 同理已是 stock y。
+    # 因此本开关实际只落地 NETFILTER_XT_MATCH_RECENT。
+    echo "ds_xt -> NETFILTER_XT_MATCH_RECENT (TARGET_REJECT 本树无此符号, TARGET_LOG 已由 stock 启用)"
     scripts/config --file out/.config \
         -e NETFILTER_XT_TARGET_REJECT \
         -e NETFILTER_XT_TARGET_LOG \

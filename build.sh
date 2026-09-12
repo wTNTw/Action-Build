@@ -352,12 +352,16 @@ fi
 #                                     只在 fs/f2fs 内部（extent_info / f2fs_sb_info），
 #                                     stock 基线符号不引用它们
 #   KPROBES                           部分内核模块 / 调试工具依赖
+#   NF_TABLES / NF_TABLES_INET        现代 nftables 工具链（本次实测项；同时会激活下方
+#                                     IPv6 NAT 段里的 NF_TABLES_IPV6 / NFT_NAT_IPV6）
 #
 # 已知被排除、实测会破坏 ABI 的项（要用必须走“让设备加载自编模块”的根治路线）：
 #   ZSMALLOC_STAT  —— 它 select DEBUG_FS，而 DEBUG_FS 给 93 个结构体加字段
 #                     （含 include/linux/backing-dev-defs.h 的 struct backing_dev_info，
 #                     被 struct super_block.s_bdi 引用），实测 246 个 stock 符号 CRC 变化
-#   NF_TABLES      —— 需单独实测后再定
+#   NF_TABLES      —— 本次一并实测：预检显示它往 struct net 加字段
+#                     （include/net/net_namespace.h:133 netns_nftables），
+#                     而 struct net 被大量导出符号引用，若守卫拒绝就单独撤掉这行
 # 想撤掉某一项：把对应 -e 改成 -d，或删掉该行。
 # ==========================================================
 echo "Enabling low-risk ABI-neutral feature pack..."
@@ -375,7 +379,9 @@ scripts/config --file out/.config \
     -e F2FS_FS_LZ4 \
     -e F2FS_FS_LZ4HC \
     -e F2FS_FS_ZSTD \
-    -e KPROBES
+    -e KPROBES \
+    -e NF_TABLES \
+    -e NF_TABLES_INET
 
 make $MAKE_ARGS -j$(nproc)
 

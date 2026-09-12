@@ -66,7 +66,7 @@ on:
         type: boolean
         default: true
       unicode_bypass:
-        description: '清除 utf8 归一化里 Default_Ignorable 的处理（文件名含不可见字符不再被抹平）？默认关闭'
+        description: "是否添加Unicode不可见字码点绕过读取漏洞修复？//Add patch for Unicode invisible code point read bypass vulnerability?"
         required: true
         type: boolean
         default: false

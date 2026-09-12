@@ -206,6 +206,10 @@ jobs:
           echo "===== ZRAM-Module/config.prop ====="
           cat "$CONFIG_PROP"
           echo "==================================="
+          # 命名与 OnePlus 一致：ZRAM-Module_<内核版本2位>_<机型>
+          KERNEL_VERSION=$(awk '/^VERSION =/{v=$3} /^PATCHLEVEL =/{p=$3} END{if(v&&p) print v"."p}' Makefile)
+          echo "KERNEL_VERSION=${KERNEL_VERSION}" >> "$GITHUB_ENV"
+          echo "内核版本(2位): ${KERNEL_VERSION}"
           echo "upload=true" >> "$GITHUB_OUTPUT"
       - name: Download ReSukiSU Manager APK
         if: ${{ inputs.ksu }}
@@ -283,7 +287,7 @@ jobs:
         if: steps.zram_prepare.outputs.upload == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: ZRAM_LGV60_${{ env.ZRAM_ALGO }}
+          name: ZRAM-Module_${{ env.KERNEL_VERSION }}_LG_V60
           path: ZRAM-Module/*
           if-no-files-found: warn
       - name: Prepare Telegram Assets
@@ -351,26 +355,46 @@ jobs:
           EOF
           )
 
-          # ZRAM 模块（可选）：与内核同次发布，单独一条消息
-          if [[ "${{ inputs.zram }}" == 1* ]] && [ -f "ZRAM-Module/config.prop" ]; then
-            ( cd ZRAM-Module && zip -qr /tmp/ZRAM_LGV60_MOD.zip ./* )
-            ZRAM_MESSAGE=$(cat <<ZEOF
-          *ZRAM 模块 — LG V60* \\(\\${ESC_BRANCH}\\)
-          *算法:* \\`${ZRAM_ALGO}`  *大小:* \\`${ZRAM_SIZE}`
-          📦 \\`ZRAM_LGV60_${KSUVER:-unknown}.zip`
-          ZEOF
-          )
-            zram_code=$(curl -s -o /tmp/telegram_zram.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-              -F chat_id="${TELEGRAM_CHAT_ID}" \
-              -F document=@/tmp/ZRAM_LGV60_MOD.zip \
-              --form-string "caption=${ZRAM_MESSAGE}")
-            echo "ZRAM 模块 TG 发布: HTTP ${zram_code}"
+          # ZRAM 模块（可选）：与内核装进同一个相册消息发出（同 OnePlus 的 sendMediaGroup）
+          ZRAM_FILE=""
+          if [[ "${{ inputs.zram }}" == 1* ]] && [ -d "./ZRAM-Module" ]; then
+            ZRAM_ZIP_NAME="ZRAM-Module_${TELEGRAM_ZIP_NAME%.zip}.zip"
+            ( cd ZRAM-Module && zip -qr "../${ZRAM_ZIP_NAME}" ./* )
+            if [ -f "${ZRAM_ZIP_NAME}" ]; then
+              ZRAM_FILE="${ZRAM_ZIP_NAME}"
+              echo "✅ ZRAM 模块已打包: ${ZRAM_FILE}"
+            fi
           fi
-          http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-            -F chat_id="${TELEGRAM_CHAT_ID}" \
-            -F document=@"${KERNEL_FILE}" \
-            --form-string "caption=${MESSAGE}" \
-            -F "parse_mode=MarkdownV2")
+
+          if [ -n "$ZRAM_FILE" ]; then
+            MEDIA_JSON=$(cat <<JSONEOF
+          [
+            {
+              "type": "document",
+              "media": "attach://kernel"
+            },
+            {
+              "type": "document",
+              "media": "attach://zram",
+              "caption": $(printf '%s' "$MESSAGE" | jq -Rs .),
+              "parse_mode": "MarkdownV2"
+            }
+          ]
+          JSONEOF
+          )
+            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMediaGroup" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F media="$MEDIA_JSON" \
+              -F kernel=@"${KERNEL_FILE}" \
+              -F zram=@"${ZRAM_FILE}")
+          else
+            echo "使用 sendDocument 发送内核安装包并附带消息..."
+            http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document=@"${KERNEL_FILE}" \
+              --form-string "caption=${MESSAGE}" \
+              -F "parse_mode=MarkdownV2")
+          fi
 
           if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
             echo "✅ Telegram 发送成功"

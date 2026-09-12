@@ -394,7 +394,12 @@ scripts/config --file out/.config \
 #   netfilter   XT_MATCH_SCTP CGROUP OSF / XT_TARGET_CHECKSUM AUDIT TCPOPTSTRIP
 #   conntrack   NF_CONNTRACK_SIP SNMP
 #   虚拟网卡    MACVTAP VXLAN GENEVE
-#   其它        BLK_DEV_NBD（网络块设备）、CRYPTO_842（zram 多一档算法）
+#   其它        BLK_DEV_NBD（网络块设备）、CRYPTO_842（zram 多一档算法）、
+#               CRYPTO_LZ4KD（华为 lz4kd，供 zram 选用）
+# LZ4KD 需用户空间选用（须在 zram 初始化/重设之前）：
+#   echo lz4kd > /sys/block/zram0/comp_algorithm
+# 内核侧见 fork 提交 wTNTw/Resukisu-LG_V60@24882a81；移植时**剔除了**上游
+# 补丁里关闭 MODVERSIONS CRC 校验的 kernel/module.c 改动。
 # ==========================================================
 echo "Enabling toolchain feature pack (audited ABI-neutral)..."
 scripts/config --file out/.config \
@@ -422,7 +427,8 @@ scripts/config --file out/.config \
     -e VXLAN \
     -e GENEVE \
     -e BLK_DEV_NBD \
-    -e CRYPTO_842
+    -e CRYPTO_842 \
+    -e CRYPTO_LZ4KD
 
 
 make $MAKE_ARGS -j$(nproc)

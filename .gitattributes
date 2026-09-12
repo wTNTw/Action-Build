@@ -1,0 +1,2 @@
+# Android 的 sh 遇到 CRLF 会报语法错，模块脚本/配置必须保持 LF
+zram/lgv60/* text eol=lf

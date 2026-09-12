@@ -338,42 +338,6 @@ else
     echo "IPv6 NAT disabled (default)"
 fi
 
-# ==========================================================
-# 低风险特性包（ABI 中性，2026-09-12 加入）
-# ----------------------------------------------------------
-# 这些选项不改变 stock 模块导入符号的 genksyms CRC：它们只新增模块/新目标，
-# 不往 task_struct / mm_struct / struct net / file / inode 这类被导出函数签名
-# 引用的核心结构体里加字段（KPROBES 只影响 linux/kprobes.h 内的结构，已核实
-# struct module 无 CONFIG_KPROBES 字段，module_layout 不受影响）。
-# 加入后仍由下方 abicheck 段实测裁决：只有 0/1327 才放行。
-#   NET_SCH_CAKE / NET_SCH_PIE        排队算法（缓冲膨胀 / 行尾丢包）
-#   NETFILTER_XT_TARGET_HL            iptables -j TTL/HL（热点共享绕过 TTL 检测）
-#   SQUASHFS / ISO9660_FS / UDF_FS / CIFS   外接存储、镜像、SMB
-#   ZSMALLOC_STAT                     zram/zsmalloc 可观测
-#   CRYPTO_LZ4HC                      给 zram 多一档压缩算法
-#   MACVLAN                           部分 VPN / 热点共存场景
-#   F2FS_FS_COMPRESSION + 三个算法      仅提供能力，需挂载参数才生效
-#   KPROBES                           部分内核模块 / 调试工具依赖
-# 想撤掉某一项：把对应 -e 改成 -d，或删掉该行。
-# ==========================================================
-echo "Enabling low-risk ABI-neutral feature pack..."
-scripts/config --file out/.config \
-    -e NET_SCH_CAKE \
-    -e NET_SCH_PIE \
-    -e NETFILTER_XT_TARGET_HL \
-    -e SQUASHFS \
-    -e ISO9660_FS \
-    -e UDF_FS \
-    -e CIFS \
-    -e ZSMALLOC_STAT \
-    -e CRYPTO_LZ4HC \
-    -e MACVLAN \
-    -e F2FS_FS_COMPRESSION \
-    -e F2FS_FS_LZ4 \
-    -e F2FS_FS_LZ4HC \
-    -e F2FS_FS_ZSTD \
-    -e KPROBES
-
 make $MAKE_ARGS -j$(nproc)
 
 # Check if kernel image exists
@@ -475,9 +439,6 @@ if grep -q "CONFIG_MODULES=y" "out/.config"; then
         STOCK_CRC_FILE=/tmp/stock-symbol-crcs.txt
         AB_BRANCH="${GITHUB_REF_NAME:-dev}"
         rm -f "$STOCK_CRC_FILE"
-        STOCK_MODULE_FILE=/tmp/stock-module-symbols.txt
-        ABI_REPORT="${ABI_REPORT:-/tmp/abi-report.txt}"
-        rm -f "$STOCK_MODULE_FILE"
         if curl -fsSL "https://raw.githubusercontent.com/wTNTw/Action-Build/$AB_BRANCH/ci/stock-symbol-crcs.txt" -o "$STOCK_CRC_FILE" 2>/dev/null; then
             echo "Fetched stock ABI baseline: $(grep -c '^[A-Za-z_]' "$STOCK_CRC_FILE") symbols (branch $AB_BRANCH)"
         else
@@ -485,65 +446,12 @@ if grep -q "CONFIG_MODULES=y" "out/.config"; then
             echo "WARN: falling back to module_layout-only check"
             rm -f "$STOCK_CRC_FILE"
         fi
-        if curl -fsSL "https://raw.githubusercontent.com/wTNTw/Action-Build/$AB_BRANCH/ci/stock-module-symbols.txt" -o "$STOCK_MODULE_FILE" 2>/dev/null; then
-            echo "Fetched stock module->symbol map: $(grep -c . "$STOCK_MODULE_FILE") entries (branch $AB_BRANCH)"
-        else
-            echo "WARN: cannot fetch ci/stock-module-symbols.txt (per-module impact report disabled)"
-            rm -f "$STOCK_MODULE_FILE"
-        fi
 
-        MODCHECK_DIR="$TARGET_KV_DIR" STOCK_CRC_FILE="$STOCK_CRC_FILE" STOCK_MODULE_FILE="$STOCK_MODULE_FILE" ABI_REPORT="$ABI_REPORT" python3 - <<'MODCHECK_PYEOF'
+        MODCHECK_DIR="$TARGET_KV_DIR" STOCK_CRC_FILE="$STOCK_CRC_FILE" python3 - <<'MODCHECK_PYEOF'
 import glob
 import os
 import struct
 import sys
-
-
-def _out_init():
-    pass
-
-NL = chr(10)
-report_lines = []
-
-
-def out(msg=""):
-    print(msg)
-    report_lines.append(msg)
-
-
-def flush_report(path):
-    if not path:
-        return
-    try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(NL.join(report_lines) + NL)
-        print("ABI report written: %s (%d lines)" % (path, len(report_lines)))
-    except Exception as exc:
-        print("WARN: cannot write ABI report to %s: %s" % (path, exc))
-
-
-REPORT_PATH = os.environ.get("ABI_REPORT", "")
-
-# ci/stock-module-symbols.txt: 每行 "<模块名> <符号>"，用于把差异符号映射回 stock 模块
-sym2mods = {}
-mod_syms = {}
-_mod_file = os.environ.get("STOCK_MODULE_FILE", "")
-if _mod_file and os.path.isfile(_mod_file):
-    for _line in open(_mod_file, encoding="utf-8", errors="replace"):
-        _parts = _line.split()
-        if len(_parts) >= 2:
-            _mod, _sym = _parts[0], _parts[1]
-            sym2mods.setdefault(_sym, set()).add(_mod)
-            mod_syms.setdefault(_mod, set()).add(_sym)
-
-
-def impacted(symbols):
-    """把符号集合映射回 stock 模块，返回 [(模块, 命中数)]，按命中数降序"""
-    hits = {}
-    for _s in symbols:
-        for _m in sym2mods.get(_s, ()):
-            hits[_m] = hits.get(_m, 0) + 1
-    return sorted(hits.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
 def versions_of(path):
@@ -599,7 +507,6 @@ symvers = os.path.join("out", "Module.symvers")
 symvers_found = os.path.isfile(symvers)
 if symvers_found:
     for line in open(symvers, encoding="utf-8", errors="replace"):
-        line = line.strip()
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0].startswith("0x"):
             try:
@@ -628,18 +535,15 @@ if base_path and os.path.isfile(base_path):
 
 if not baseline:
     got = ours.get("module_layout")
-    out("stock baseline unavailable -> module_layout-only check")
+    print("stock baseline unavailable -> module_layout-only check")
     if got is None:
-        out("WARN: module_layout missing, skip")
-        flush_report(REPORT_PATH)
+        print("WARN: module_layout missing, skip")
         sys.exit(0)
-    out("built kernel module_layout CRC = 0x%08x" % got)
+    print("built kernel module_layout CRC = 0x%08x" % got)
     if got != 0xD273BD0C:
-        out("BUILD REJECTED: module_layout CRC mismatch (expected 0xd273bd0c)")
-        flush_report(REPORT_PATH)
+        print("BUILD REJECTED: module_layout CRC mismatch (expected 0xd273bd0c)")
         sys.exit(1)
-    out("OK: module_layout CRC matches the stock vendor modules")
-    flush_report(REPORT_PATH)
+    print("OK: module_layout CRC matches the stock vendor modules")
     sys.exit(0)
 
 compared = 0
@@ -653,56 +557,37 @@ for sym, crc in baseline.items():
     if ours[sym] != crc:
         mismatch.append((sym, ours[sym], crc))
 
-out("stock baseline symbols: %d | compared: %d | mismatched: %d | not in our build: %d"
-    % (len(baseline), compared, len(mismatch), len(missing)))
+print("stock baseline symbols: %d | compared: %d | mismatched: %d | not in our build: %d"
+      % (len(baseline), compared, len(mismatch), len(missing)))
 
 if compared == 0:
-    out("")
-    out("BUILD REJECTED: nothing to compare - no built module symbols were found")
-    out("ABI compatibility is therefore UNKNOWN, not OK. Check that")
-    out("modules_install produced .ko files and that out/Module.symvers exists.")
-    flush_report(REPORT_PATH)
+    print("")
+    print("BUILD REJECTED: nothing to compare - no built module symbols were found")
+    print("ABI compatibility is therefore UNKNOWN, not OK. Check that")
+    print("modules_install produced .ko files and that out/Module.symvers exists.")
     sys.exit(1)
 
 if mismatch:
-    out("")
-    out("==========================================================")
-    out("BUILD REJECTED: kernel ABI differs from the stock ROM")
-    out("")
-    out("完整差异清单（%d 个符号）:" % len(mismatch))
-    for sym, a, b in mismatch:
-        out("  %-46s ours=0x%08x stock=0x%08x" % (sym, a, b))
-    if sym2mods:
-        hit = impacted([s for s, _a, _b in mismatch])
-        out("")
-        out("会因此拒绝加载的 stock 模块（共 %d 个）:" % len(hit))
-        for mod, n in hit:
-            out("  %-34s %d 个符号对不上" % (mod, n))
-        clean = sorted(set(mod_syms) - set(m for m, _n in hit))
-        out("不受影响的 stock 模块（共 %d 个）: %s" % (len(clean), ", ".join(clean)))
-    else:
-        out("")
-        out("WARN: ci/stock-module-symbols.txt 不可用，按模块的影响面无法给出")
-    out("")
-    out("These stock /vendor modules will refuse to load:")
-    out("  <mod>: disagrees about version of symbol <sym>")
-    out("=> /proc/modules ends up empty, WiFi and audio are gone.")
-    out("Revert the kernel config change that caused this.")
-    out("==========================================================")
-    flush_report(REPORT_PATH)
+    print("")
+    print("==========================================================")
+    print("BUILD REJECTED: kernel ABI differs from the stock ROM")
+    print("")
+    for sym, a, b in mismatch[:25]:
+        print("  %-42s ours=0x%08x stock=0x%08x" % (sym, a, b))
+    if len(mismatch) > 25:
+        print("  ... and %d more" % (len(mismatch) - 25))
+    print("")
+    print("These stock /vendor modules will refuse to load:")
+    print("  <mod>: disagrees about version of symbol <sym>")
+    print("=> /proc/modules ends up empty, WiFi and audio are gone.")
+    print("Revert the kernel config change that caused this.")
+    print("==========================================================")
     sys.exit(1)
 
-out("OK: 0 differences vs the stock ROM -> all /vendor modules will load")
+print("OK: 0 differences vs the stock ROM -> all /vendor modules will load")
 if missing:
-    out("WARN: %d baseline symbols are not exported by this build (not verified)" % len(missing))
-    out("WARN: 完整缺失清单:")
-    for sym in sorted(missing):
-        out("  %s" % sym)
-    if sym2mods:
-        hit = impacted(sorted(missing))
-        if hit:
-            out("WARN: 依赖这些符号的 stock 模块: %s" % ", ".join("%s(%d)" % (m, n) for m, n in hit))
-flush_report(REPORT_PATH)
+    print("WARN: %d baseline symbols are not exported by this build (not verified)" % len(missing))
+    print("WARN: first 20: %s" % ", ".join(sorted(missing)[:20]))
 sys.exit(0)
 MODCHECK_PYEOF
         

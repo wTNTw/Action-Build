@@ -69,7 +69,7 @@ on:
         description: "是否添加Unicode不可见字码点绕过读取漏洞修复？//Add patch for Unicode invisible code point read bypass vulnerability?"
         required: true
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:

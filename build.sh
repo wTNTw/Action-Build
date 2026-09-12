@@ -110,6 +110,7 @@ RE_KERNEL_ENABLE=${RE_KERNEL:-true}
 NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
 IPV6_NAT_ENABLE=${IPV6_NAT:-false}
+UNICODE_BYPASS_ENABLE=${UNICODE_BYPASS:-false}
 
 # droid_spaces 及其细分开关已于 2026-09-10 整体移除。容器真正缺的是 IPC
 # namespace，而在这棵内核树上拿 IPC ns 必须打开 SYSVIPC 或 POSIX_MQUEUE，
@@ -130,6 +131,7 @@ echo "RE_KERNEL: $RE_KERNEL_ENABLE"
 echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
 echo "IPV6_NAT: $IPV6_NAT_ENABLE"
+echo "UNICODE_BYPASS: $UNICODE_BYPASS_ENABLE"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -338,6 +340,65 @@ else
     echo "IPv6 NAT disabled (default)"
 fi
 
+# ==========================================================
+# unicode_bypass（可选，默认关；workflow 输入 unicode_bypass）
+# ----------------------------------------------------------
+# 去掉 fs/unicode 里 ignore_init() 对 Default_Ignorable_Code_Point 的处理，使含
+# 不可见字符的文件名在 NFD/NFDICF 归一化下不再被抹平（社区做法，详见本地
+# docs/LG_V60_FEATURES_AND_ABI.md 第十四节）。
+# 做法：删 mkutf8data.c 的 ignore_init() 及其调用 → 用 Unicode 12.1.0 的 7 个 UCD
+# 文件（sha1 校验）重新生成 → 覆盖 utf8data.h_shipped（正常构建会用 shipped 覆盖
+# utf8data.h，所以必须改 shipped 才真正生效）。
+# 注意：不要与 CONFIG_UNICODE_NORMALIZATION_SELFTEST 同开（其期望值是 stock 表）。
+# ==========================================================
+if [ "$UNICODE_BYPASS_ENABLE" = "true" ]; then
+    echo "Applying unicode bypass (regenerating fs/unicode tables)..."
+    (
+      set -e
+      cd fs/unicode
+      mkdir -p .ucd
+      UCD=https://www.unicode.org/Public/12.1.0/ucd
+      for f in CaseFolding.txt DerivedAge.txt DerivedCoreProperties.txt \
+               NormalizationCorrections.txt NormalizationTest.txt UnicodeData.txt; do
+          [ -s ".ucd/$f" ] || curl -fsSL "$UCD/$f" -o ".ucd/$f"
+      done
+      [ -s .ucd/DerivedCombiningClass.txt ] || curl -fsSL "$UCD/extracted/DerivedCombiningClass.txt" -o .ucd/DerivedCombiningClass.txt
+      printf "%s\n" \
+        "dc9245f6803c4ac99555c361f5052e0b13eb779b  CaseFolding.txt" \
+        "3281104f237184cdb5d869e86eb8573678ada7da  DerivedAge.txt" \
+        "2f5f995ccb96e0fa84b15151b35d5e2681535175  DerivedCombiningClass.txt" \
+        "5b8698a3fcd5018e1987f296b02e2c17e696415e  DerivedCoreProperties.txt" \
+        "cd83935fbc012345d8792d2c704f69497e753835  NormalizationCorrections.txt" \
+        "ea419aae505b337b0d99a83fa83fe58ddff7c19f  NormalizationTest.txt" \
+        "dc973c0fc93d6f09d9ab9f70d1c9f89c447f0526  UnicodeData.txt" \
+        > /tmp/ucd.sha1
+      ( cd .ucd && sha1sum -c /tmp/ucd.sha1 )
+      python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path('mkutf8data.c')
+t = p.read_text()
+if 'static void ignore_init(void)' in t:
+    lines = t.split(chr(10))
+    s = next(i for i, l in enumerate(lines) if l == 'static void ignore_init(void)')
+    e = next(i for i in range(s + 1, len(lines)) if lines[i] == '}')
+    del lines[s:e + 1]
+    t = chr(10).join(lines)
+    t = t.replace(chr(9) + 'ignore_init();' + chr(10), '', 1)
+    p.write_text(t)
+    print('  ignore_init removed (%d lines)' % (e - s + 1))
+else:
+    print('  ignore_init already absent, skip')
+PYEOF
+      gcc -O2 -o /tmp/mkutf8data mkutf8data.c
+      /tmp/mkutf8data -a .ucd/DerivedAge.txt -c .ucd/DerivedCombiningClass.txt \
+        -p .ucd/DerivedCoreProperties.txt -d .ucd/UnicodeData.txt \
+        -f .ucd/CaseFolding.txt -n .ucd/NormalizationCorrections.txt \
+        -t .ucd/NormalizationTest.txt -o utf8data.h
+      cp utf8data.h utf8data.h_shipped
+      echo "  generated table: $(wc -c < utf8data.h_shipped) bytes (stock 330943)"
+      rm -rf .ucd /tmp/mkutf8data /tmp/ucd.sha1
+    )
+fi
 # ==========================================================
 # 低风险特性包（ABI 中性，2026-09-12；经 ABI 实测校正）
 # ----------------------------------------------------------

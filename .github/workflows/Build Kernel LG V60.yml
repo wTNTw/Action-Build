@@ -65,6 +65,11 @@ on:
         required: true
         type: boolean
         default: true
+      unicode_bypass:
+        description: '清除 utf8 归一化里 Default_Ignorable 的处理（文件名含不可见字符不再被抹平）？默认关闭'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -137,6 +142,7 @@ jobs:
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
           IPV6_NAT: ${{ inputs.ipv6_nat }}
+          UNICODE_BYPASS: ${{ inputs.unicode_bypass }}
           ABI_REPORT: ${{ github.workspace }}/abi-report.txt
         run: |
           echo "=== Kernel Source Verification ==="

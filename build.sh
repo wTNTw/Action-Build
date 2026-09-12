@@ -413,6 +413,8 @@ fi
 #                                     只在 fs/f2fs 内部（extent_info / f2fs_sb_info），
 #                                     stock 基线符号不引用它们
 #   KPROBES                           部分内核模块 / 调试工具依赖
+#   CRYPTO_LZ4KD                      华为 lz4kd（内核 fork@24882a81 已加入），
+#                                     选用：echo lz4kd > /sys/block/zram0/comp_algorithm
 #   （nftables 未纳入，见下方排除清单）
 #
 # 已知被排除、实测会破坏 ABI 的项（要用必须走“让设备加载自编模块”的根治路线）：
@@ -442,7 +444,8 @@ scripts/config --file out/.config \
     -e F2FS_FS_LZ4 \
     -e F2FS_FS_LZ4HC \
     -e F2FS_FS_ZSTD \
-    -e KPROBES
+    -e KPROBES \
+    -e CRYPTO_LZ4KD
 # ==========================================================
 
 make $MAKE_ARGS -j$(nproc)

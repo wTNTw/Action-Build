@@ -382,6 +382,48 @@ scripts/config --file out/.config \
     -e F2FS_FS_LZ4HC \
     -e F2FS_FS_ZSTD \
     -e KPROBES
+# ==========================================================
+# 工具链特性包（2026-09-12；25 项，全部经 audit_candidates.py 审计干净）
+# ----------------------------------------------------------
+# 判据同上一段：这些项只注册自身（qdisc / classifier / tc action / netfilter
+# 匹配与目标 / conntrack helper / 虚拟网卡 / 块设备 / 压缩算法），不往被导出
+# 函数签名引用的结构体里加字段。
+#   tc 队列     NET_SCH_SFQ RED GRED DRR HFSC CHOKE SKBPRIO
+#   tc 分类器   NET_CLS_BASIC NET_CLS_CGROUP
+#   tc 动作     NET_ACT_VLAN CONNMARK TUNNEL_KEY
+#   netfilter   XT_MATCH_SCTP CGROUP OSF / XT_TARGET_CHECKSUM AUDIT TCPOPTSTRIP
+#   conntrack   NF_CONNTRACK_SIP SNMP
+#   虚拟网卡    MACVTAP VXLAN GENEVE
+#   其它        BLK_DEV_NBD（网络块设备）、CRYPTO_842（zram 多一档算法）
+# ==========================================================
+echo "Enabling toolchain feature pack (audited ABI-neutral)..."
+scripts/config --file out/.config \
+    -e NET_SCH_SFQ \
+    -e NET_SCH_RED \
+    -e NET_SCH_GRED \
+    -e NET_SCH_DRR \
+    -e NET_SCH_HFSC \
+    -e NET_SCH_CHOKE \
+    -e NET_SCH_SKBPRIO \
+    -e NET_CLS_BASIC \
+    -e NET_CLS_CGROUP \
+    -e NET_ACT_VLAN \
+    -e NET_ACT_CONNMARK \
+    -e NET_ACT_TUNNEL_KEY \
+    -e NETFILTER_XT_MATCH_SCTP \
+    -e NETFILTER_XT_MATCH_CGROUP \
+    -e NETFILTER_XT_MATCH_OSF \
+    -e NETFILTER_XT_TARGET_CHECKSUM \
+    -e NETFILTER_XT_TARGET_AUDIT \
+    -e NETFILTER_XT_TARGET_TCPOPTSTRIP \
+    -e NF_CONNTRACK_SIP \
+    -e NF_CONNTRACK_SNMP \
+    -e MACVTAP \
+    -e VXLAN \
+    -e GENEVE \
+    -e BLK_DEV_NBD \
+    -e CRYPTO_842
+
 
 make $MAKE_ARGS -j$(nproc)
 

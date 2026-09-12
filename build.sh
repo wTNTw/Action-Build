@@ -338,6 +338,45 @@ else
     echo "IPv6 NAT disabled (default)"
 fi
 
+# ==========================================================
+# 低风险特性包（ABI 中性，2026-09-12；经 ABI 实测校正）
+# ----------------------------------------------------------
+# 只保留不会改变“被导出函数签名引用的结构体”的选项。判定依据：先算各选项的
+# Kconfig select 闭包，再全树扫描“结构体内部由这些宏守护的字段”。
+#   NET_SCH_CAKE / NET_SCH_PIE        排队算法（缓冲膨胀 / 行尾丢包）
+#   NETFILTER_XT_TARGET_HL            iptables -j TTL/HL（热点共享绕过 TTL 检测）
+#   SQUASHFS / ISO9660_FS / UDF_FS / CIFS   外接存储、镜像、SMB
+#   CRYPTO_LZ4HC                      给 zram 多一档压缩算法
+#   MACVLAN                           部分 VPN / 热点共存场景
+#   F2FS_FS_COMPRESSION + 三个算法      仅提供能力，需挂载参数才生效；其结构体改动
+#                                     只在 fs/f2fs 内部（extent_info / f2fs_sb_info），
+#                                     stock 基线符号不引用它们
+#   KPROBES                           部分内核模块 / 调试工具依赖
+#
+# 已知被排除、实测会破坏 ABI 的项（要用必须走“让设备加载自编模块”的根治路线）：
+#   ZSMALLOC_STAT  —— 它 select DEBUG_FS，而 DEBUG_FS 给 93 个结构体加字段
+#                     （含 include/linux/backing-dev-defs.h 的 struct backing_dev_info，
+#                     被 struct super_block.s_bdi 引用），实测 246 个 stock 符号 CRC 变化
+#   NF_TABLES      —— 需单独实测后再定
+# 想撤掉某一项：把对应 -e 改成 -d，或删掉该行。
+# ==========================================================
+echo "Enabling low-risk ABI-neutral feature pack..."
+scripts/config --file out/.config \
+    -e NET_SCH_CAKE \
+    -e NET_SCH_PIE \
+    -e NETFILTER_XT_TARGET_HL \
+    -e SQUASHFS \
+    -e ISO9660_FS \
+    -e UDF_FS \
+    -e CIFS \
+    -e CRYPTO_LZ4HC \
+    -e MACVLAN \
+    -e F2FS_FS_COMPRESSION \
+    -e F2FS_FS_LZ4 \
+    -e F2FS_FS_LZ4HC \
+    -e F2FS_FS_ZSTD \
+    -e KPROBES
+
 make $MAKE_ARGS -j$(nproc)
 
 # Check if kernel image exists

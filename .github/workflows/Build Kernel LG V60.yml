@@ -60,6 +60,11 @@ on:
         required: true
         type: boolean
         default: true
+      zram:
+        description: "ZRAM(0关闭1开启)/算法名/大小//ZRAM (0: disable, 1: enable) / Algorithm name / Size"
+        required: true
+        type: string
+        default: "1/lz4kd/4294967296"
       ipv6_nat:
         description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
         required: true
@@ -73,7 +78,7 @@ on:
 
 jobs:
   build:
-    name: Build Kernel for ${{ inputs.device }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})
+    name: Build Kernel for ${{ inputs.device }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})${{ startsWith(inputs.zram, '1/') && ' [ZRAM]' || '' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -95,6 +100,24 @@ jobs:
           echo "=== Downloaded build.sh ==="
           ls -lh build.sh
       
+      - name: Parse ZRAM option
+        id: zram_opt
+        run: |
+          ZRAM="${{ inputs.zram }}"
+          if [[ "$ZRAM" != 1* ]]; then
+            echo "ZRAM 关闭（输入: $ZRAM）"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$(grep -o '/' <<< "$ZRAM" | wc -l)" -lt 2 ]]; then
+            echo "错误: ZRAM 参数缺少必要的分隔符 '/'，格式应为: 总开关0关1开/算法名/大小"
+            exit 10
+          fi
+          IFS='/' read -r ZRAM_SWSTA ZRAM_ALGO ZRAM_SIZE <<< "$ZRAM"
+          echo "ZRAM_ALGO=$ZRAM_ALGO" >> "$GITHUB_ENV"
+          echo "ZRAM_SIZE=$ZRAM_SIZE" >> "$GITHUB_ENV"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "ZRAM: 算法=$ZRAM_ALGO 大小=$ZRAM_SIZE"
       - name: Cleanup Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -157,6 +180,27 @@ jobs:
             bash build.sh ${{ inputs.device }}
           fi
       
+      - name: Prepare ZRAM module
+        id: zram_prepare
+        if: steps.zram_opt.outputs.enabled == 'true'
+        run: |
+          # 模块取自触发分支（与 build.sh 同源）；V60 的 zram 是内建的，模块不需要 .ko
+          BRANCH="${{ github.ref_name }}"
+          curl -fsSL "https://raw.githubusercontent.com/wTNTw/Action-Build/$BRANCH/ZRAM_LGV60.zip" -o /tmp/ZRAM_LGV60.zip
+          rm -rf ZRAM-Module && mkdir -p ZRAM-Module
+          unzip -oq /tmp/ZRAM_LGV60.zip -d ZRAM-Module
+          CONFIG_PROP="ZRAM-Module/config.prop"
+          if [ ! -f "$CONFIG_PROP" ]; then
+            echo "❌ 未找到 config.prop，跳过 ZRAM 模块"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed -i "s|^ZRAM_ALGO=.*|ZRAM_ALGO=${ZRAM_ALGO}|" "$CONFIG_PROP"
+          sed -i "s|^ZRAM_SIZE=.*|ZRAM_SIZE=${ZRAM_SIZE}|" "$CONFIG_PROP"
+          echo "===== ZRAM-Module/config.prop ====="
+          cat "$CONFIG_PROP"
+          echo "==================================="
+          echo "upload=true" >> "$GITHUB_OUTPUT"
       - name: Download ReSukiSU Manager APK
         if: ${{ inputs.ksu }}
         continue-on-error: true
@@ -229,6 +273,13 @@ jobs:
           path: abi-report.txt
           if-no-files-found: warn
 
+      - name: Upload ZRAM module
+        if: steps.zram_prepare.outputs.upload == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ZRAM_LGV60_${{ env.ZRAM_ALGO }}
+          path: ZRAM-Module/*
+          if-no-files-found: warn
       - name: Prepare Telegram Assets
         if: success()
         id: prepare_tg
@@ -294,6 +345,21 @@ jobs:
           EOF
           )
 
+          # ZRAM 模块（可选）：与内核同次发布，单独一条消息
+          if [[ "${{ inputs.zram }}" == 1* ]] && [ -f "ZRAM-Module/config.prop" ]; then
+            ( cd ZRAM-Module && zip -qr /tmp/ZRAM_LGV60_MOD.zip ./* )
+            ZRAM_MESSAGE=$(cat <<ZEOF
+          *ZRAM 模块 — LG V60* \\(\\${ESC_BRANCH}\\)
+          *算法:* \\`${ZRAM_ALGO}`  *大小:* \\`${ZRAM_SIZE}`
+          📦 \\`ZRAM_LGV60_${KSUVER:-unknown}.zip`
+          ZEOF
+          )
+            zram_code=$(curl -s -o /tmp/telegram_zram.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document=@/tmp/ZRAM_LGV60_MOD.zip \
+              --form-string "caption=${ZRAM_MESSAGE}")
+            echo "ZRAM 模块 TG 发布: HTTP ${zram_code}"
+          fi
           http_code=$(curl -s -o /tmp/telegram_resp.txt -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
             -F document=@"${KERNEL_FILE}" \

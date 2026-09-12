@@ -67,7 +67,52 @@ on:
         default: true
 
 jobs:
+  preflight:
+    name: Preflight (upstream invariants)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that upstream still matches what the build assumes
+        if: ${{ inputs.ksu }}
+        run: |
+          set -uo pipefail
+          fail=0
+          check() {
+            if [ ! -e "$1" ]; then echo "FAIL  $3  （文件不存在: $1）"; fail=1; return; fi
+            if grep -qE "$2" "$1"; then echo "OK    $3"; else echo "FAIL  $3  （$1 未匹配 /$2/）"; fail=1; fi
+          }
+
+          echo "=== ReSukiSU 上游不变量（build.sh 与内核 fork 依赖）==="
+          git clone --depth 1 https://github.com/ReSukiSU/ReSukiSU.git ksu-src >/dev/null 2>&1 || true
+          check ksu-src/kernel/feature/sucompat.h 'define TIF_PROC_IN_KSU_EXECVE' 'sucompat.h 定义 TIF_PROC_IN_KSU_EXECVE'
+          check ksu-src/kernel/feature/sucompat.c 'set_thread_flag\(TIF_PROC_IN_KSU_EXECVE\)' 'su→ksud 改写处置位 TIF'
+          check ksu-src/kernel/feature/sucompat.c 'test_thread_flag\(TIF_PROC_IN_KSU_EXECVE\)' 'post-execve 钩子判 TIF'
+          check ksu-src/kernel/feature/sucompat.c 'ksu_handle_post_execveat_sucompat' 'post-execveat sucompat 别名存在'
+          check ksu-src/kernel/feature/sucompat.c 'ksu_install_su_fd' 'su-session fd 安装函数仍在'
+          check ksu-src/kernel/tools/kernel_compat.mk 'ksu_handle_post_execve' 'kernel_compat.mk 仍探测 post-execve 钩子'
+          # 版本号由构建步骤自己算（这里 --depth 1 会让 rev-list 计数失真）
+
+          echo "=== 内核 fork 不变量 ==="
+          curl -fsSL "https://raw.githubusercontent.com/${{ inputs.kernel_repo }}/${{ inputs.kernel_branch }}/fs/exec.c" -o fs-exec.c
+          check fs-exec.c 'ksu_handle_post_execveat_sucompat' 'fs/exec.c 调用 post-execve 钩子'
+          check fs-exec.c 'out_ret:' 'fs/exec.c 结构未变（out_ret 仍在）'
+
+          echo "=== ci/ 基线文件可达性（守卫会从本分支拉取）==="
+          for f in ci/stock-symbol-crcs.txt ci/stock-module-symbols.txt; do
+            if curl -fsSL "https://raw.githubusercontent.com/wTNTw/Action-Build/${{ github.ref_name }}/$f" -o /dev/null; then
+              echo "OK    $f 可获取"
+            else
+              echo "FAIL  $f 无法从分支 ${{ github.ref_name }} 获取"; fail=1
+            fi
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error title=Preflight failed::上游不变量或基线文件已变，构建会失败或产出有问题的内核；请按上面 FAIL 项核对。"
+            exit 1
+          fi
+          echo "preflight OK：上游与基线均符合预期"
+
   build:
+    needs: preflight
     name: Build Kernel for ${{ inputs.device }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})
     runs-on: ubuntu-latest
     
@@ -137,6 +182,7 @@ jobs:
           SUFFIX: ${{ inputs.suffix }}
           CCM: ${{ inputs.ccm }}
           IPV6_NAT: ${{ inputs.ipv6_nat }}
+          ABI_REPORT: ${{ github.workspace }}/abi-report.txt
         run: |
           echo "=== Kernel Source Verification ==="
           ls -la arch/arm64/configs/ | grep defconfig || echo "ERROR: No defconfig found!"
@@ -213,6 +259,14 @@ jobs:
           name: ${{ inputs.ksu && format('ReSukiSU_{0}', env.KSUVER) || 'NoKernelSU' }}_LG_V60_AnyKernel3
           path: anykernel/*
           if-no-files-found: error
+
+      - name: Upload ABI report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: abi-report-lgv60
+          path: abi-report.txt
+          if-no-files-found: warn
 
       - name: Prepare Telegram Assets
         if: success()

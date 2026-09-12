@@ -137,10 +137,33 @@ echo "TARGET_DEVICE: $TARGET_DEVICE"
 
 if [ $KSU_ENABLE -eq 1 ]; then
     echo "KSU is enabled"
-    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-    
+    # KSU 源码版本：沿用 OnePlus 工作流的 KSU_META 约定
+    #   管理器分支名/内置分支名/自定义版本标识(可省略)/回退提交hash(可省略)
+    # 例：main/main//                    → 跟随 main（默认，与改动前行为一致）
+    #     main/v4.2.0-rc1//            → 锁定到 tag（4 段都要在，故 tag 后留空一段）
+    #     main/main//23a40c0f          → 锁定到指定提交
+    KSU_META="${KSU_META:-main/main//}"
+    if [ "$(printf '%s' "$KSU_META" | tr -cd '/' | wc -c)" -lt 3 ]; then
+        echo "错误: KSU_META 参数缺少必要的分隔符 '/'，格式应为: 管理器分支名/内置分支名/自定义标识(可省略)/提交hash(可省略)"
+        exit 1
+    fi
+    IFS='/' read -r KSU_MANAGER_BRANCH KSU_BUILTIN_BRANCH KSU_CUSTOM_TAG MANUAL_HASH <<< "$KSU_META"
+    KSU_MANAGER_BRANCH=${KSU_MANAGER_BRANCH:-main}
+    KSU_BUILTIN_BRANCH=${KSU_BUILTIN_BRANCH:-main}
+    echo "KSU_META: 管理器分支=$KSU_MANAGER_BRANCH 内置分支=$KSU_BUILTIN_BRANCH 自定义标识=${KSU_CUSTOM_TAG:-未启用} 手动hash=${MANUAL_HASH:-未启用}"
+    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${KSU_MANAGER_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BUILTIN_BRANCH"
+
+    if [ -n "$MANUAL_HASH" ]; then
+        echo "回退到指定提交: $MANUAL_HASH"
+        git -C KernelSU fetch origin "$KSU_BUILTIN_BRANCH" --depth=50 || true
+        git -C KernelSU checkout "$MANUAL_HASH"
+    fi
+
     # Compute KernelSU version number (same scheme as Action-Build)
-    KSU_VERSION=$(expr $(git -C KernelSU rev-list --count HEAD 2>/dev/null || echo 13000) + 30700)
+    KSU_VERSION=$(expr $(git -C KernelSU rev-list --count "${KSU_MANAGER_BRANCH:-main}" 2>/dev/null || echo 13000) + 30700)
+    if [ -n "$KSU_CUSTOM_TAG" ]; then
+        KSU_VERSION="${KSU_VERSION}-${KSU_CUSTOM_TAG}"
+    fi
     echo "KSU_VERSION: $KSU_VERSION"
     
     if [ -n "$GITHUB_ENV" ]; then

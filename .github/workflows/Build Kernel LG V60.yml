@@ -26,6 +26,11 @@ on:
         required: true
         type: boolean
         default: true
+      ksu_meta:
+        description: "管理器分支名(必填)/内置分支名(必填)/自定义版本标识(留空不修改)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Custom version identifier (Leave blank to not modify) / Rollback branch commit hash version (Leave blank to not modify)"
+        required: false
+        type: string
+        default: "main/main//"
       kpm:
         description: 'Kernel Module Implementation (KPM/KPN/N/A)'
         required: true
@@ -159,6 +164,7 @@ jobs:
       - name: Build Kernel
         env:
           KPM_OPTION: ${{ inputs.kpm }}
+          KSU_META: ${{ inputs.ksu_meta }}
           RE_KERNEL: ${{ inputs.re_kernel }}
           NETFILTER: ${{ inputs.netfilter }}
           BUILD_TIME: ${{ inputs.build_time }}

@@ -1,0 +1,6 @@
+id=zram-lgv60
+name=ZRAM for LG V60 (timelm)
+version=v1.0
+versionCode=1
+author=wTNTW
+description=开机后重建 zram0：按 config.prop 指定算法（默认 lz4kd，需内核含该算法）与大小。不改动内核、不替换模块。

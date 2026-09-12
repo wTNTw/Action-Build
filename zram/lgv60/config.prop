@@ -1,0 +1,21 @@
+# ZRAM for LG V60 —— 用户配置
+# 改完保存，重启生效；也可在 KernelSU 管理器里点模块的“操作”按钮立即应用。
+
+# 压缩算法。内核需先包含该算法，可用值见：
+#   cat /sys/block/zram0/comp_algorithm
+# stock 内核: lzo lz4 lz4hc zstd
+# 刷了含 lz4kd 的构建后额外可用: lz4kd
+ZRAM_ALGO=lz4kd
+
+# zram 大小（字节）。留空 = 沿用 ROM 当前大小（只换算法，最稳）。
+# 常用值：4294967296(4G) 6442450944(6G) 8589934592(8G) 12884901888(12G)
+ZRAM_SIZE=
+
+# swap 优先级。留空 = 沿用当前优先级。V60 ROM 默认 -2。
+SWAP_PRIORITY=-2
+
+# 压缩流数量。ROM 默认 8。
+MAX_COMP_STREAMS=8
+
+# 等待 sys.boot_completed=1 的最长秒数（service.sh 用；"--now" 模式跳过等待）。
+BOOT_WAIT_SECONDS=120

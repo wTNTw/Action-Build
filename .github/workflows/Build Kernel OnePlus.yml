@@ -836,7 +836,11 @@ jobs:
 
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             echo "正在打susfs补丁"
-            patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+            # -F 3：上游 patch 的 fs/super.c hunk#1 上下文未包含 OEM 树多出的
+            # "#include <trace/hooks/fs.h>"，严格匹配会失败（hunk#1 打不上、hunk#2 却打上，
+            # 导致 susfs_is_current_ksu_domain / DEFAULT_KSU_MNT_MINOR_DEV 未声明而编译失败）。
+            # 与 hmbird 补丁同样的做法。
+            patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             echo "susfs_patch完成"
             SUSFS_COMMIT_HASH=$(cd ../../susfs4ksu && git rev-parse --short=8 HEAD)
             echo "SUSFS_COMMIT_HASH=$SUSFS_COMMIT_HASH" >> $GITHUB_ENV

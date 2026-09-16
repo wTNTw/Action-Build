@@ -54,6 +54,24 @@ fun File.deleteLine(pattern: Regex) {
     writeText(out.joinToString("\n") + "\n")
 }
 
+/** sed '/pattern/,+N d' —— 删除匹配行及其后 N 行 */
+fun File.deleteLineAndFollowing(pattern: Regex, extraLines: Int) {
+    val out = mutableListOf<String>()
+    var skip = 0
+    for (line in readLines()) {
+        if (skip > 0) {
+            skip--
+            continue
+        }
+        if (pattern.containsMatchIn(line)) {
+            skip = extraLines
+            continue
+        }
+        out.add(line)
+    }
+    writeText(out.joinToString("\n") + "\n")
+}
+
 /** sed '/start/,/end/d' —— 删除从 start 到 end(含首尾)的整段,支持多段 */
 fun File.deleteBlock(start: Regex, end: Regex) {
     val out = mutableListOf<String>()
@@ -331,6 +349,10 @@ fun apply() {
             val namespace = f("fs/namespace.c")
             namespace.deleteLine(Regex("""^#include <trace/hooks/blk\.h>$"""))
             logApply(namespace, "removed #include <trace/hooks/blk.h>")
+
+            val superC = f("fs/super.c")
+            superC.deleteLineAndFollowing(Regex("""^#include <trace/hooks/fs\.h>$"""), 1)
+            logApply(superC, "removed #include <trace/hooks/fs.h>")
         }
     }
 
@@ -445,6 +467,21 @@ fun revert() {
             val base = f("fs/proc/base.c")
             base.deleteLine(Regex("""^#include <linux/dma-buf\.h>$"""))
             logRevert(base, "removed #include <linux/dma-buf.h>")
+        }
+        if (sublevel >= 157) {
+            val namespace = f("fs/namespace.c")
+            namespace.insertAfter(
+                Regex("""^#include "internal\.h"$"""),
+                "#include <trace/hooks/blk.h>"
+            )
+            logRevert(namespace, "restored #include <trace/hooks/blk.h> directly after #include \"internal.h\"")
+
+            val superC = f("fs/super.c")
+            superC.insertAfter(
+                Regex("""^#include "internal\.h"$"""),
+                "#include <trace/hooks/fs.h>"
+            )
+            logRevert(superC, "restored #include <trace/hooks/fs.h> directly after #include \"internal.h\"")
         }
     }
 

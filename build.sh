@@ -111,6 +111,8 @@ NETFILTER_ENABLE=${NETFILTER:-true}
 CCM_ENABLE=${CCM:-false}
 IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 UNICODE_BYPASS_ENABLE=${UNICODE_BYPASS:-false}
+NOMOUNT_ENABLE=${NOMOUNT:-false}
+NOMOUNT_REF=${NOMOUNT_REF:-v2.0.0}
 
 # droid_spaces 及其细分开关已于 2026-09-10 整体移除。容器真正缺的是 IPC
 # namespace，而在这棵内核树上拿 IPC ns 必须打开 SYSVIPC 或 POSIX_MQUEUE，
@@ -132,6 +134,7 @@ echo "NETFILTER: $NETFILTER_ENABLE"
 echo "CCM: $CCM_ENABLE"
 echo "IPV6_NAT: $IPV6_NAT_ENABLE"
 echo "UNICODE_BYPASS: $UNICODE_BYPASS_ENABLE"
+echo "NOMOUNT: $NOMOUNT_ENABLE (ref: $NOMOUNT_REF)"
 
 echo "TARGET_DEVICE: $TARGET_DEVICE"
 
@@ -180,6 +183,56 @@ if [ $KSU_ENABLE -eq 1 ]; then
     # 会让锚点失配并把构建卡在 exit 1（2026-09-12 即因此失败过一次）。
 else
     echo "KSU is disabled"
+fi
+
+# ==========================================================
+# NoMount 内核集成（可选，默认关；workflow 输入 nomount）
+# ----------------------------------------------------------
+# 上游：maxsteeel/nomount。它做的不是挂载，而是在 VFS 层劫持目标
+# superblock/inode 的 s_op / i_op / f_op / d_op 与 sb->s_xattr，在路径解析和
+# readdir 上直接合成条目（注入 / whiteout），因此不写挂载表、/proc/mounts 干净，
+# 代价是必须在内核里跑：要么编进内核（这里走这条），要么针对本树编 LKM。
+# LG V60 是 4.19，上游 release ZIP 里预编译的 LKM 只覆盖 android12-5.10 到
+# android16-6.12，落到 4.19 加载不了，所以只能内置。
+#
+# 只做三件事（等价于上游 kernel/setup.sh，只是用固定 tag 的 tarball 而不是
+# git clone + 软链，避免引入 git 依赖和指向仓库外的软链）：
+#   1. 把 kernel/src/* 拷进 fs/nomount/
+#   2. fs/Makefile 追加 obj-$(CONFIG_NOMOUNT) += nomount/
+#   3. fs/Kconfig 在最后一个 endmenu 之前插入 source "fs/nomount/Kconfig"
+#
+# 设备侧还要另装同版本的 NoMount 模块 ZIP（NoMount-v<版本>-release.zip）：
+# 它的 metamount.sh 检测到内置支持后会跳过加载 LKM，只把 bin/nm 和 UID 规则
+# 用起来。内核侧与 bin/nm 走同一份 keyring 协议，**两边版本必须一致**，
+# 所以 NOMOUNT_REF 要与刷入的模块 ZIP 版本对齐（上游 release note 明确写过
+# 2.0.0 的内核与模块互不兼容旧版）。
+# ==========================================================
+if [ "$NOMOUNT_ENABLE" = "true" ]; then
+    echo "Integrating NoMount ($NOMOUNT_REF) into the kernel tree..."
+    if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then
+        echo "NoMount already integrated in this tree, skip download"
+    else
+        NOMOUNT_TMP=$(mktemp -d)
+        curl -fsSL "https://github.com/maxsteeel/nomount/archive/refs/tags/${NOMOUNT_REF}.tar.gz" |
+            tar xz -C "$NOMOUNT_TMP"
+        mkdir -p fs/nomount
+        cp -f "$NOMOUNT_TMP"/*/kernel/src/* fs/nomount/
+        rm -rf "$NOMOUNT_TMP"
+    fi
+
+    grep -q 'CONFIG_NOMOUNT' fs/Makefile ||
+        printf '\nobj-$(CONFIG_NOMOUNT) += nomount/\n' >>fs/Makefile
+
+    if ! grep -q 'fs/nomount/Kconfig' fs/Kconfig; then
+        awk '/^endmenu/ { last=NR } { l[NR]=$0 } END { for (i=1;i<=NR;i++) { if (i==last) print "source \"fs/nomount/Kconfig\""; print l[i] } }' \
+            fs/Kconfig >fs/Kconfig.tmp && mv fs/Kconfig.tmp fs/Kconfig
+    fi
+
+    echo "  fs/nomount/: $(ls fs/nomount | tr '\n' ' ')"
+    echo "  fs/Makefile: $(grep -n 'CONFIG_NOMOUNT' fs/Makefile)"
+    echo "  fs/Kconfig:  $(grep -n 'fs/nomount/Kconfig' fs/Kconfig)"
+else
+    echo "NoMount disabled"
 fi
 
 # Clear Previous Build
@@ -273,6 +326,28 @@ if [ $KSU_ENABLE -eq 1 ]; then
     fi
 else
     scripts/config --file out/.config -d KSU
+fi
+
+# ==========================================================
+# NoMount config
+# ----------------------------------------------------------
+# 上游 Kconfig 是 `default y`：只要 fs/nomount/Kconfig 被 source 进 fs/Kconfig，
+# defconfig 解析时它就会自动变 y。这里显式 -e 是把意图写死（上游将来改成
+# default n 也不会掉链子），并立刻确认解析生效——Kconfig 挂接写错却在编译半小时
+# 之后才暴露，是最贵的失败方式。
+# 关掉时：CI 每次都是干净检出，fs/nomount 不存在，无需处理；本地脏树里若还留着
+# 上一轮拷进去的 fs/nomount，`default y` 会让它照样被编进去，故显式 -d 关掉。
+# ==========================================================
+if [ "$NOMOUNT_ENABLE" = "true" ]; then
+    scripts/config --file out/.config -e NOMOUNT
+    if ! grep -q '^CONFIG_NOMOUNT=y' out/.config; then
+        echo "ERROR: CONFIG_NOMOUNT is not set - the fs/Kconfig hook did not take effect"
+        exit 1
+    fi
+    echo "NoMount enabled (CONFIG_NOMOUNT=y)"
+elif [ -d fs/nomount ]; then
+    echo "WARN: fs/nomount is still present in this tree; forcing CONFIG_NOMOUNT off"
+    scripts/config --file out/.config -d NOMOUNT
 fi
 
 # Handle Re:Kernel option
@@ -479,6 +554,27 @@ if [ -f "out/arch/arm64/boot/Image" ]; then
 else
     echo "The file [out/arch/arm64/boot/Image] does not exist. Seems Kernel build failed."
     exit 1
+fi
+
+# ==========================================================
+# NoMount 后置校验
+# ----------------------------------------------------------
+# 只写进 .config 不等于编进去了：配置项存在但目录没进 Makefile（或反之）都会
+# 得到一个"假装有 NoMount"的内核，设备侧 metamount.sh 会报 kernel not patched
+# 并把自己 disable 掉。这里查两处硬证据：目标文件被编出，且内核侧的 keyring
+# 入口 nm_key_type 真的链进了 vmlinux。
+# llvm-nm 来自 NDK 工具链（build.sh 顶部已把它加进 PATH）。
+# ==========================================================
+if [ "$NOMOUNT_ENABLE" = "true" ]; then
+    if [ ! -f out/fs/nomount/nomount.o ]; then
+        echo "ERROR: out/fs/nomount/nomount.o is missing - CONFIG_NOMOUNT did not build"
+        exit 1
+    fi
+    if ! llvm-nm out/vmlinux | grep -q ' nm_key_type$'; then
+        echo "ERROR: nm_key_type is not linked into vmlinux - NoMount is not usable"
+        exit 1
+    fi
+    echo "NoMount verified: out/fs/nomount/nomount.o + nm_key_type in vmlinux"
 fi
 
 # Patch Kernel For KPM Support

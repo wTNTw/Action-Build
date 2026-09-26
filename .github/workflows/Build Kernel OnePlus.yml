@@ -152,6 +152,11 @@ on:
         description: "是否添加Unicode不可见字码点绕过读取漏洞修复？//Add patch for Unicode invisible code point read bypass vulnerability?"
         required: true
         default: true
+      NOMOUNT:
+        type: boolean
+        description: "是否内核内置 NoMount（VFS 路径重定向，替代 OverlayFS/MagicMount）？需在设备侧另装同版本 NoMount 模块 ZIP//Build NoMount (VFS path redirection) into the kernel? Requires the matching NoMount module ZIP on device"
+        required: true
+        default: false
       SCHED_HMBIRD:
         type: boolean
         description: "是否添加风驰驱动1.0？//Add Fengchi (HMBIRD) Driver 1.0?"
@@ -358,6 +363,7 @@ jobs:
           echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
           echo "Selected SCHED_HMBIRD: ${{ github.event.inputs.SCHED_HMBIRD }}"
           echo "Selected UNICODE_BYPASS: ${{ github.event.inputs.UNICODE_BYPASS }}"
+          echo "Selected NOMOUNT: ${{ github.event.inputs.NOMOUNT }}"
           echo "Selected DROID_SPACES: ${{ github.event.inputs.DROID_SPACES }}"
           echo "Selected RE_KERNEL: ${{ github.event.inputs.RE_KERNEL }}"
           echo "Selected LZ4_UPDATE: ${{ github.event.inputs.LZ4_UPDATE }}"
@@ -1044,6 +1050,42 @@ jobs:
           curl -LSs https://raw.githubusercontent.com/vc-teahouse/Baseband-guard/main/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' ./security/Kconfig
 
+      # NoMount 内核内置：VFS 路径重定向子系统（上游 maxsteeel/nomount）。
+      # 它不产生挂载：劫持目标 s_op / i_op（lookup、d_revalidate）/ f_op（iterate_dir）
+      # 并把 sb->s_xattr 换成代理，在路径解析与 readdir 上直接合成条目（注入 / whiteout），
+      # 所以必须在内核里跑。上游 release ZIP 里预编译的 LKM 只覆盖 android12-5.10 到
+      # android16-6.12，而本线是自编 GKI（KMI_SYMBOL_LIST_STRICT_MODE=0 + 大量补丁），
+      # LKM 的 CRC/vermagic 未必对得上，因此走内置：源码进 fs/nomount/，挂 fs/Makefile 与 fs/Kconfig。
+      # 设备侧仍需另装**同版本**的 NoMount 模块 ZIP（metamount.sh 检测到内置后会跳过加载 LKM）。
+      # 版本必须与设备模块对齐，NOMOUNT_REF 可用同名环境变量覆盖。
+      - name: Apply NoMount
+        if: ${{ github.event.inputs.NOMOUNT == 'true' }}
+        run: |
+          set -e
+          cd kernel_workspace/kernel_platform/common
+          NOMOUNT_REF="${NOMOUNT_REF:-v2.0.0}"
+          echo "=== Integrating NoMount ($NOMOUNT_REF) ==="
+          if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then
+            echo "NoMount already integrated in this tree, skip download"
+          else
+            NOMOUNT_TMP=$(mktemp -d)
+            curl -fsSL "https://github.com/maxsteeel/nomount/archive/refs/tags/${NOMOUNT_REF}.tar.gz" | tar xz -C "$NOMOUNT_TMP"
+            mkdir -p fs/nomount
+            cp -f "$NOMOUNT_TMP"/*/kernel/src/* fs/nomount/
+            rm -rf "$NOMOUNT_TMP"
+          fi
+          grep -q 'CONFIG_NOMOUNT' fs/Makefile || printf '\nobj-$(CONFIG_NOMOUNT) += nomount/\n' >> fs/Makefile
+          if ! grep -q 'fs/nomount/Kconfig' fs/Kconfig; then
+            awk '/^endmenu/ { last=NR } { l[NR]=$0 } END { for (i=1;i<=NR;i++) { if (i==last) print "source \"fs/nomount/Kconfig\""; print l[i] } }' fs/Kconfig > fs/Kconfig.tmp && mv fs/Kconfig.tmp fs/Kconfig
+          fi
+          echo "  fs/nomount/: $(ls fs/nomount | tr '\n' ' ')"
+          echo "  fs/Makefile: $(grep -n 'CONFIG_NOMOUNT' fs/Makefile)"
+          echo "  fs/Kconfig:  $(grep -n 'fs/nomount/Kconfig' fs/Kconfig)"
+          # 挂接必须真的落地：fs/Kconfig 里没有 endmenu 可插时 awk 会静默不插入，
+          # 那样会编出一个没有 NoMount 的内核，不如现在直接失败。
+          grep -q 'fs/nomount/Kconfig' fs/Kconfig || { echo "ERROR: fs/Kconfig hook missing"; exit 1; }
+          grep -q 'CONFIG_NOMOUNT' fs/Makefile || { echo "ERROR: fs/Makefile hook missing"; exit 1; }
+
       # 配置信息，带*为附加项目，具有一定危险性和不确定性
       - name: Add Configuration Settings
         run: |
@@ -1214,6 +1256,14 @@ jobs:
             set_config "CONFIG_IP6_NF_MATCH_HL=y"
             set_config "CONFIG_IP_NF_MANGLE=y"
             set_config "CONFIG_IP6_NF_MANGLE=y"
+          fi
+
+          # NoMount（内置 VFS 路径重定向）
+          # 上游 Kconfig 是 default y：只要 fs/nomount/Kconfig 被 source 进树，defconfig 解析
+          # 就会自动打开它，这里显式写死是防上游改成 default n。想从 /proc/config.gz 里藏掉
+          # 这一项，把 set_config 换成 set_hide_config。
+          if [ "${{ github.event.inputs.NOMOUNT }}" == "true" ]; then
+            set_config "CONFIG_NOMOUNT=y"
           fi
 
           # 构建依赖项调整及优化
@@ -1503,6 +1553,35 @@ jobs:
             echo "✅ Image file finally located at: $image_path"
             cp "$image_path" ./AnyKernel3/Image
             cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
+          fi
+
+      # NoMount 后置校验：只把配置写进 gki_defconfig 不等于编进去了。
+      # 两条构建路径（FAST 的 make O=out 与官方 Kleaf 脚本）产物落点不同，所以这里
+      # 一是找编出来的 nomount.o 与真正生效的 .config，二是在最终 Image 里找 NoMount
+      # 注册的 keyring 名 "nomount"（arm64 Image 没有符号表，字符串是可靠证据）。
+      # 任一为真即通过；全都找不到就失败，避免产出一个"假装有 NoMount"的内核
+      # （设备侧 metamount.sh 会报 kernel not patched 并把自己 disable 掉）。
+      - name: Verify NoMount
+        if: ${{ github.event.inputs.NOMOUNT == 'true' }}
+        run: |
+          set -e
+          echo "=== NoMount build verification ==="
+          find -L kernel_workspace -type f -name nomount.o 2>/dev/null | head -5 || true
+          cfg=$(grep -rl '^CONFIG_NOMOUNT=y' --include='.config' kernel_workspace 2>/dev/null | head -3 || true)
+          [ -n "$cfg" ] && echo "config with CONFIG_NOMOUNT=y: $cfg"
+          ok=0
+          if [ -f ./AnyKernel3/Image ] && grep -qa 'nomount' ./AnyKernel3/Image; then
+            echo "OK: 'nomount' string present in AnyKernel3/Image"
+            ok=1
+          fi
+          vmlinux=$(find -L kernel_workspace -type f -name vmlinux 2>/dev/null | head -1 || true)
+          if [ -n "$vmlinux" ] && grep -qa 'nm_key_type' "$vmlinux"; then
+            echo "OK: nm_key_type present in $vmlinux"
+            ok=1
+          fi
+          if [ "$ok" -ne 1 ]; then
+            echo "ERROR: NoMount is not present in the built kernel - check that fs/nomount was hooked and CONFIG_NOMOUNT=y"
+            exit 1
           fi
 
       - name: Apply KPX and Replace Image

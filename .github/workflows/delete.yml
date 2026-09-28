@@ -65,9 +65,33 @@ on:
         required: false
         type: boolean
         default: true
+      release_mode:
+        type: choice
+        description: '发行版(Release)清理类型'
+        required: false
+        default: 'none'
+        options:
+          - none
+          - all
+          - keep-latest
+      release_keep_count:
+        description: '保留最近 N 个发行版（release_mode=keep-latest 时生效，0 等同 all）'
+        required: false
+        default: '3'
+      release_delete_tags:
+        description: '删除发行版时一并删除对应的 git tag？'
+        required: false
+        type: boolean
+        default: true
+      release_orphan_tags:
+        description: '同时清理没有对应发行版的孤儿 tag？'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
+  contents: write
 
 concurrency:
   group: cleanup-${{ github.workflow }}
@@ -384,6 +408,113 @@ jobs:
             } else {
               console.log(`共找到 ${totalFound} 个缓存，成功删除 ${totalDeleted} 个，失败 ${totalFailed} 个。`);
             }
+
+  cleanup-releases:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.release_mode != 'none' }}
+    steps:
+      - name: Validate release inputs
+        env:
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_KEEP_COUNT: ${{ inputs.release_keep_count }}
+        run: |
+          if [[ "$RELEASE_MODE" == "keep-latest" ]] && ! [[ "$RELEASE_KEEP_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "❌ release_keep_count 必须为非负整数，当前值: '$RELEASE_KEEP_COUNT'"
+            exit 1
+          fi
+          echo "✅ 发行版清理输入校验通过（mode=$RELEASE_MODE, keep=$RELEASE_KEEP_COUNT）"
+
+      - name: Clean releases
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const mode = '${{ inputs.release_mode }}';
+            const keepRaw = '${{ inputs.release_keep_count }}';
+            const keep = mode === 'keep-latest' ? (parseInt(keepRaw, 10) || 0) : 0;
+            const deleteTags = '${{ inputs.release_delete_tags }}' === 'true';
+            const sweepOrphans = '${{ inputs.release_orphan_tags }}' === 'true';
+
+            console.log(`🔹 发行版清理模式: ${mode}（保留 ${keep} 个 / 删 tag: ${deleteTags} / 孤儿 tag: ${sweepOrphans}）`);
+
+            // listReleases 按 created_at 倒序返回，因此"最近 N 个"就是前 N 项。
+            // 先取全量快照再逐个删除，避免边删边分页导致漏删。
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner, repo, per_page: 100 },
+              (response) => response.data
+            );
+            const allReleaseTags = new Set(releases.map((r) => r.tag_name));
+            const targets = mode === 'all' ? releases : releases.slice(keep);
+
+            console.log(`共 ${releases.length} 个发行版，本次删除 ${targets.length} 个，保留 ${releases.length - targets.length} 个。`);
+
+            let deletedReleases = 0;
+            let deletedTags = 0;
+            let orphanDeleted = 0;
+            let failed = 0;
+
+            for (const rel of targets) {
+              try {
+                await github.rest.repos.deleteRelease({ owner, repo, release_id: rel.id });
+                deletedReleases++;
+                console.log(`✅ 已删除发行版: ${rel.tag_name}`);
+              } catch (err) {
+                failed++;
+                console.log(`❌ 删除发行版失败: ${rel.tag_name} (${err.message})`);
+                continue;
+              }
+              if (!deleteTags) continue;
+              try {
+                await github.rest.git.deleteRef({ owner, repo, ref: `tags/${rel.tag_name}` });
+                deletedTags++;
+              } catch (err) {
+                // 422: 该 tag 指向的引用不存在；404: 已无此 ref。都视为"已无 tag"，不计失败。
+                if (err.status === 404 || err.status === 422) {
+                  console.log(`ℹ️ tag 已不存在或不可删除，跳过: ${rel.tag_name}`);
+                } else {
+                  failed++;
+                  console.log(`❌ 删除 tag 失败: ${rel.tag_name} (${err.message})`);
+                }
+              }
+            }
+
+            // 孤儿 tag = 不属于本次快照中任何发行版的 tag 引用（含仓库里的历史遗留 tag）
+            if (sweepOrphans) {
+              const refs = await github.paginate(
+                github.rest.git.listMatchingRefs,
+                { owner, repo, ref: 'tags/', per_page: 100 },
+                (response) => response.data
+              );
+              for (const item of refs) {
+                const name = item.ref.replace('refs/tags/', '');
+                if (allReleaseTags.has(name)) continue;
+                try {
+                  await github.rest.git.deleteRef({ owner, repo, ref: `tags/${name}` });
+                  orphanDeleted++;
+                  console.log(`✅ 已删除孤儿 tag: ${name}`);
+                } catch (err) {
+                  failed++;
+                  console.log(`❌ 删除孤儿 tag 失败: ${name} (${err.message})`);
+                }
+              }
+              console.log(`孤儿 tag 处理完成，共删除 ${orphanDeleted} 个。`);
+            }
+
+            const summaryLines = [
+              '### 🧹 发行版清理结果',
+              '',
+              '| 项目 | 数量 |',
+              '|---|---|',
+              `| 清理模式 | ${mode}${mode === 'keep-latest' ? ` (保留 ${keep} 个)` : ''} |`,
+              `| 总发行版 | ${releases.length} |`,
+              `| 已删除发行版 | ${deletedReleases} |`,
+              `| 已删除 tag | ${deletedTags} |`,
+              `| 已删除孤儿 tag | ${orphanDeleted} |`,
+              `| 失败 | ${failed} |`,
+            ];
+            await core.summary.addRaw(summaryLines.join('\n')).write();
+            console.log(`发行版清理完成：删除 ${deletedReleases} 个发行版、${deletedTags} 个 tag、${orphanDeleted} 个孤儿 tag，失败 ${failed} 个。`);
 
   cleanup-self-workflow:
     needs: [cleanup-workflow, cleanup-caches]

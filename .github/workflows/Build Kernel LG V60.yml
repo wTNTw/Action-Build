@@ -84,7 +84,7 @@ on:
         description: "是否内置 NoMount（VFS 路径重定向，替代 OverlayFS/MagicMount）？需在设备侧另装同版本 NoMount 模块 ZIP//Integrate NoMount (VFS path redirection) into the kernel? Requires the matching NoMount module ZIP on device"
         required: true
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:

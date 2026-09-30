@@ -156,7 +156,7 @@ on:
         type: boolean
         description: "是否内核内置 NoMount（VFS 路径重定向，替代 OverlayFS/MagicMount）？需在设备侧另装同版本 NoMount 模块 ZIP//Build NoMount (VFS path redirection) into the kernel? Requires the matching NoMount module ZIP on device"
         required: true
-        default: false
+        default: true
       SCHED_HMBIRD:
         type: boolean
         description: "是否添加风驰驱动1.0？//Add Fengchi (HMBIRD) Driver 1.0?"

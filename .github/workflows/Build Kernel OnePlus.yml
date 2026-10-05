@@ -223,7 +223,7 @@ jobs:
           git config --global user.name "Numbersf"
           git config --global user.email "263623064@qq.com"
           mkdir kernel_workspace && cd kernel_workspace
-          git clone https://github.com/Numbersf/Action-Build.git -b ReSukiSU
+          git clone https://github.com/Numbersf/Action-Build.git -b BakaSU
 
       - name: Extract Manifest Info
         id: extract_info
@@ -743,7 +743,7 @@ jobs:
             chmod +x "$f"
           done
 
-      - name: Add ReSukiSU
+      - name: Add BakaSU
         run: |
           cd kernel_workspace/kernel_platform
           KSU_META="${{ github.event.inputs.KSU_META }}"
@@ -762,7 +762,7 @@ jobs:
           [[ -n "$KSU_CUSTOM_TAG" ]] && echo "自定义版本标识: $KSU_CUSTOM_TAG" || echo "自定义版本标识: 未启用"
           [[ -n "$MANUAL_HASH" ]] && echo "手动指定 hash: $MANUAL_HASH" || echo "手动指定 hash: 未启用"
 
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${KSU_MANAGER_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BUILTIN_BRANCH"
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${KSU_MANAGER_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BUILTIN_BRANCH"
           cd ./KernelSU
 
           if [[ -n "$KSU_CUSTOM_TAG" ]]; then
@@ -788,7 +788,7 @@ jobs:
         run: |
           kotlin "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/PatchFakePatches.kts" apply "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/common"
 
-      - name: Apply Patches ReSukiSU
+      - name: Apply Patches BakaSU
         env:
           FILE: ${{ github.event.inputs.FILE }}
         run: |
@@ -1131,7 +1131,7 @@ jobs:
           }
           trap 'inject_fake_config' EXIT
 
-          # ReSukiSU配置
+          # BakaSU配置
           set_config "CONFIG_KSU=y"
           set_config "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y"
           set_config "CONFIG_KSU_TOOLKIT_SUPPORT=y"
@@ -1631,7 +1631,7 @@ jobs:
           wget -O ksu_module_susfs_1.5.2+_Release.zip https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip
           cp ksu_module_susfs_1.5.2+_Release.zip ./AnyKernel3/
 
-      - name: Download Latest ReSukiSU APK from CI
+      - name: Download Latest BakaSU APK from CI
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1641,13 +1641,13 @@ jobs:
           echo "Using branch: $KSU_MANAGER_BRANCH"
           echo "Downloading artifact: $MANAGER_ARTIFACT"
 
-          run_id=$(gh api "repos/ReSukiSU/ReSukiSU/actions/workflows/build-manager.yml/runs?branch=$KSU_MANAGER_BRANCH&status=success&event=push&per_page=1" --jq '.workflow_runs[0].id' || echo "")
+          run_id=$(gh api "repos/Baka-SU/BakaSU/actions/workflows/build-manager.yml/runs?branch=$KSU_MANAGER_BRANCH&status=success&event=push&per_page=1" --jq '.workflow_runs[0].id' || echo "")
 
           if [[ -z "$run_id" ]]; then
             echo "No successful workflow run found on branch $KSU_MANAGER_BRANCH. Skipping download."
             exit 0
           fi
-          artifact_url=$(gh api "repos/ReSukiSU/ReSukiSU/actions/runs/$run_id/artifacts" | jq -r ".artifacts[] | select(.name == \"$MANAGER_ARTIFACT\") | .archive_download_url" | head -n1)
+          artifact_url=$(gh api "repos/Baka-SU/BakaSU/actions/runs/$run_id/artifacts" | jq -r ".artifacts[] | select(.name == \"$MANAGER_ARTIFACT\") | .archive_download_url" | head -n1)
 
           if [[ -z "$artifact_url" ]]; then
             echo "No artifact '$MANAGER_ARTIFACT' found in run $run_id. Skipping download."
@@ -1714,7 +1714,7 @@ jobs:
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
         with:
-          name: ReSukiSU_${{ env.KSUVER }}_${{ steps.extract_info.outputs.value }}_AnyKernel3${{ steps.suffix.outputs.value }}
+          name: AnyKernel3_BakaSU_${{ env.KSUVER }}_${{ steps.extract_info.outputs.value }}(${{ env.CKERNEL_VERSION }})${{ steps.suffix.outputs.value }}
           path: ./AnyKernel3/*
 
       - name: Extract and Process ZRAM Module
@@ -1783,8 +1783,9 @@ jobs:
         run: |
           KSU_VER="${{ env.KSUVER }}"
           MODEL="${{ steps.extract_info.outputs.value }}"
+          CKERNEL_VER="${{ env.CKERNEL_VERSION }}"
           FUNC_SUFFIX="${{ steps.suffix.outputs.value }}"
-          RELEASE_NAME="ReSukiSU_${KSU_VER}_${MODEL}_AnyKernel3${FUNC_SUFFIX}"
+          RELEASE_NAME="AnyKernel3_BakaSU_${KSU_VER}_${MODEL}(${CKERNEL_VER})${FUNC_SUFFIX}"
 
           mkdir -p release-assets
           cp -r ./AnyKernel3/* ./release-assets/ || true
@@ -1846,7 +1847,7 @@ jobs:
           tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
           name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
           body: |
-            ReSukiSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            BakaSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
 
             ## Build Information
             - KernelSU Version: ${{ env.KSUVER }}
@@ -1867,7 +1868,7 @@ jobs:
             ## Installation
             1. 下载上方 zip 文件（Assets）
             2. 在 Recovery 中刷入（AnyKernel3 包含 Image）
-            3. 重启并根据需要安装 ReSukiSU APK（如包含）
+            3. 重启并根据需要安装 BakaSU APK（如包含）
 
             ## Notes & Warnings
             - 本内核仅适用于: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
@@ -1925,7 +1926,7 @@ jobs:
           ESC_BRANCH=$(escape_mdv2 "${BRANCH_NAME}")
 
           MESSAGE=$(cat <<EOF
-          *ReSukiSU — ${ESC_BRANCH} Branch*
+          *BakaSU — ${ESC_BRANCH} Branch*
           *Release:* \`${ESC_NAME}\`
           *Model:* \`${ESC_MODEL}\`
           *KSU version:* \`${ESC_KSU}\`

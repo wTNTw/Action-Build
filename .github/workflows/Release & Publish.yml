@@ -92,12 +92,12 @@ jobs:
 
             # ===== 实际自动检测逻辑 =====
             # 从 AnyKernel3 artifact 名正则提取（涵盖 KSUVER / MODEL / TKERNEL_VERSION）
-            ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_ReSukiSU_*" | head -1)
+            ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_BakaSU_*" | head -1)
             if [ -n "$ANY_DIR" ]; then
               ARTIFACT_NAME=$(basename "$ANY_DIR")
               echo "🧩 检测到 artifact: ${ARTIFACT_NAME}"
-              # 正则: AnyKernel3_ReSukiSU_<KSUVER>_<MODEL>(<KERNVER>)<SUFFIX>
-              if [[ "$ARTIFACT_NAME" =~ ^AnyKernel3_ReSukiSU_([0-9]+)_(.+)\((.+)\)(.+)?$ ]]; then
+              # 正则: AnyKernel3_BakaSU_<KSUVER>_<MODEL>(<KERNVER>)<SUFFIX>
+              if [[ "$ARTIFACT_NAME" =~ ^AnyKernel3_BakaSU_([0-9]+)_(.+)\((.+)\)(.+)?$ ]]; then
                 echo "KSUVER=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
                 echo "MODEL=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
                 echo "TKERNEL_VERSION=${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
@@ -150,7 +150,7 @@ jobs:
           mkdir -p release-assets
 
           # 复制 AnyKernel3
-          ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_ReSukiSU_*" | head -1)
+          ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_BakaSU_*" | head -1)
           if [ -d "$ANY_DIR" ]; then
             echo "✅ 找到 AnyKernel3: $(basename "$ANY_DIR")"
             cp -r "$ANY_DIR"/* ./release-assets/ || true
@@ -169,7 +169,7 @@ jobs:
           # 组装 Release 文件名
           KSU_VER="${KSUVER}"
           MODEL="${MODEL}"
-          RELEASE_NAME="ReSukiSU_${KSU_VER}"
+          RELEASE_NAME="AnyKernel3_BakaSU_${KSU_VER}_${MODEL}(${TKERNEL_VERSION})${SUFFIX_VALUE:-}"
           cd release-assets || exit 0
           zip -r "../${RELEASE_NAME}.zip" ./* || true
           cd ..
@@ -226,7 +226,7 @@ jobs:
           tag_name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
           name: ${{ steps.prepare_release.outputs.RELEASE_NAME }}
           body: |
-            ReSukiSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
+            BakaSU Kernel for ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
 
             ## Build Information
             - KernelSU Version: ${{ env.KSUVER }}
@@ -247,7 +247,7 @@ jobs:
             ## Installation
             1. 下载上方 zip 文件（Assets）
             2. 在 Recovery 中刷入（AnyKernel3 包含 Image）
-            3. 重启并根据需要安装 ReSukiSU APK（如包含）
+            3. 重启并根据需要安装 BakaSU APK（如包含）
 
             ## Notes & Warnings
             - 本内核仅适用于: ${{ steps.prepare_release.outputs.RELEASE_MODEL }}
@@ -294,7 +294,7 @@ jobs:
           ESC_BRANCH=$(escape_mdv2 "${BRANCH_NAME}")
 
           CAPTION=$(cat <<EOF
-          *ReSukiSU — ${ESC_BRANCH} Branch*
+          *BakaSU — ${ESC_BRANCH} Branch*
           *Release:* \`${ESC_NAME}\`
           *Model:* \`${ESC_MODEL}\`
           *KSU version:* \`${ESC_KSU}\`

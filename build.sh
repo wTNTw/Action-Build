@@ -123,7 +123,7 @@ NOMOUNT_REF=${NOMOUNT_REF:-v2.0.0}
 KSU_ZIP_STR=NoKernelSU
 if [ "$2" == "ksu" ]; then
     KSU_ENABLE=1
-    KSU_ZIP_STR=ReSukiSU-SuSFS
+    KSU_ZIP_STR=BakaSU-SuSFS
 else
     KSU_ENABLE=0
 fi
@@ -154,7 +154,7 @@ if [ $KSU_ENABLE -eq 1 ]; then
     KSU_MANAGER_BRANCH=${KSU_MANAGER_BRANCH:-main}
     KSU_BUILTIN_BRANCH=${KSU_BUILTIN_BRANCH:-main}
     echo "KSU_META: 管理器分支=$KSU_MANAGER_BRANCH 内置分支=$KSU_BUILTIN_BRANCH 自定义标识=${KSU_CUSTOM_TAG:-未启用} 手动hash=${MANUAL_HASH:-未启用}"
-    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${KSU_MANAGER_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BUILTIN_BRANCH"
+    curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${KSU_MANAGER_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BUILTIN_BRANCH"
 
     if [ -n "$MANUAL_HASH" ]; then
         echo "回退到指定提交: $MANUAL_HASH"
@@ -174,7 +174,7 @@ if [ $KSU_ENABLE -eq 1 ]; then
     fi
 
     # Android 16 su-session fd scope fix：上游已收编，本地不再打补丁。
-    # ReSukiSU 052ca277（kernel: compat for old version of susfs ...）把
+    # BakaSU 052ca277（kernel: compat for old version of susfs ...）把
     # TIF_PROC_IN_KSU_EXECVE 的置位与守卫从 CONFIG_KSU_MANUAL_HOOK 里移出：
     # sucompat.h 在 SUSFS 分支直接定义该标志、do_ksu_handle_execveat_sucompat()
     # 无条件 set_thread_flag()、ksu_handle_post_execve() 也无条件先判该标志。
@@ -968,7 +968,7 @@ EOF
     fi
 fi
 
-# ------------- Attach ReSukiSU Manager APK to AnyKernel3 -------------
+# ------------- Attach BakaSU Manager APK to AnyKernel3 -------------
 # Manager APK will be downloaded by GitHub Actions workflow
 # Skip this step in build.sh to avoid hanging
 
@@ -992,9 +992,9 @@ else
     CUSTOM_SUFFIX=""
 fi
 
-# Match unified naming: ReSukiSU_35114_LG_V60_AnyKernel3.zip
+# Match unified naming: BakaSU_35114_LG_V60_AnyKernel3.zip
 if [ $KSU_ENABLE -eq 1 ]; then
-    ZIP_FILENAME=ReSukiSU_${KSU_VERSION}_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
+    ZIP_FILENAME=BakaSU_${KSU_VERSION}_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
 else
     ZIP_FILENAME=NoKernelSU_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
 fi

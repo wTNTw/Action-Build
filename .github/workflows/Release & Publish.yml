@@ -92,16 +92,16 @@ jobs:
 
             # ===== 实际自动检测逻辑 =====
             # 从 AnyKernel3 artifact 名正则提取（涵盖 KSUVER / MODEL / TKERNEL_VERSION）
-            ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_BakaSU_*" | head -1)
+            ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "*_BakaSU_*_AnyKernel3*" | head -1)
             if [ -n "$ANY_DIR" ]; then
               ARTIFACT_NAME=$(basename "$ANY_DIR")
               echo "🧩 检测到 artifact: ${ARTIFACT_NAME}"
-              # 正则: AnyKernel3_BakaSU_<KSUVER>_<MODEL>(<KERNVER>)<SUFFIX>
-              if [[ "$ARTIFACT_NAME" =~ ^AnyKernel3_BakaSU_([0-9]+)_(.+)\((.+)\)(.+)?$ ]]; then
-                echo "KSUVER=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
-                echo "MODEL=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
+              # 正则: <MODEL>_BakaSU_<KSUVER>_AnyKernel3(<KERNVER>)<SUFFIX>
+              if [[ "$ARTIFACT_NAME" =~ ^(.+)_BakaSU_([0-9]+)_AnyKernel3\((.+)\)(.+)?$ ]]; then
+                echo "MODEL=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
+                echo "KSUVER=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
                 echo "TKERNEL_VERSION=${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
-                echo "✅ 自动检测: KSUVER=${BASH_REMATCH[1]}, MODEL=${BASH_REMATCH[2]}, KERNEL=${BASH_REMATCH[3]}"
+                echo "✅ 自动检测: KSUVER=${BASH_REMATCH[2]}, MODEL=${BASH_REMATCH[1]}, KERNEL=${BASH_REMATCH[3]}"
               else
                 echo "⚠️ artifact 名解析失败，使用 unknown 占位"
                 echo "KSUVER=unknown" >> "$GITHUB_ENV"
@@ -150,7 +150,7 @@ jobs:
           mkdir -p release-assets
 
           # 复制 AnyKernel3
-          ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "AnyKernel3_BakaSU_*" | head -1)
+          ANY_DIR=$(find ./artifacts -maxdepth 1 -type d -name "*_BakaSU_*_AnyKernel3*" | head -1)
           if [ -d "$ANY_DIR" ]; then
             echo "✅ 找到 AnyKernel3: $(basename "$ANY_DIR")"
             cp -r "$ANY_DIR"/* ./release-assets/ || true
@@ -169,7 +169,7 @@ jobs:
           # 组装 Release 文件名
           KSU_VER="${KSUVER}"
           MODEL="${MODEL}"
-          RELEASE_NAME="AnyKernel3_BakaSU_${KSU_VER}_${MODEL}(${TKERNEL_VERSION})${SUFFIX_VALUE:-}"
+          RELEASE_NAME="${MODEL}_BakaSU_${KSU_VER}_AnyKernel3(${TKERNEL_VERSION})${SUFFIX_VALUE:-}"
           cd release-assets || exit 0
           zip -r "../${RELEASE_NAME}.zip" ./* || true
           cd ..

@@ -180,9 +180,9 @@ When there is a kernel-level update or a significant slowdown caused by changes 
  
 - Removed potential version codes from the suffix of `Anykernel3.zip` config file, replaced with exact `Android` version numbers `XX.X.(X)`.
 ```
-AnyKernel3_BakaSU_34895_OnePlusAce2Pro_Android16.0.0(5.15.180)_KPM_BBG_ILH_DS_REKER.zip
-AnyKernel3_BakaSU_34895_OnePlus11_Android14.1.0(5.15.123)_KPM_BBG_ILH_DS_REKER.zip
-AnyKernel3_BakaSU_34895_OnePlus15(AOSP)_Android16.0.0(6.12.23)_KPM_BBG_ILH_DS_REKER.zip
+OnePlusAce2Pro_Android16.0.0_BakaSU_34895_AnyKernel3(5.15.180)_KPM_BBG_ILH_DS_REKER.zip
+OnePlus11_Android14.1.0_BakaSU_34895_AnyKernel3(5.15.123)_KPM_BBG_ILH_DS_REKER.zip
+OnePlus15(AOSP)_Android16.0.0_BakaSU_34895_AnyKernel3(6.12.23)_KPM_BBG_ILH_DS_REKER.zip
 ```  
  
 - Added support for the `LZ4K、LZ4KD` compression algorithm in the `zram` module.   [@ShirkNeko](https://github.com/ShirkNeko)  

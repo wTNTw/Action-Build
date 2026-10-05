@@ -182,9 +182,9 @@ https://github.com/你的用户名(username)/你的仓库名/actions/caches
  
 - 从写入 `Anykernel3.zip` 的配置文件后缀中删除潜在的版本代码,替换成精确的 `Android` 版本号`XX.X.(X)`
 ```
-AnyKernel3_BakaSU_34895_OnePlusAce2Pro_Android16.0.0(5.15.180)_KPM_BBG_ILH_DS_REKER.zip
-AnyKernel3_BakaSU_34895_OnePlus11_Android14.1.0(5.15.123)_KPM_BBG_ILH_DS_REKER.zip
-AnyKernel3_BakaSU_34895_OnePlus15(AOSP)_Android16.0.0(6.12.23)_KPM_BBG_ILH_DS_REKER.zip
+OnePlusAce2Pro_Android16.0.0_BakaSU_34895_AnyKernel3(5.15.180)_KPM_BBG_ILH_DS_REKER.zip
+OnePlus11_Android14.1.0_BakaSU_34895_AnyKernel3(5.15.123)_KPM_BBG_ILH_DS_REKER.zip
+OnePlus15(AOSP)_Android16.0.0_BakaSU_34895_AnyKernel3(6.12.23)_KPM_BBG_ILH_DS_REKER.zip
 ```  
  
 - 添加 `zram` 模块的 `LZ4K、LZ4KD` 压缩算法支持[@ShirkNeko](https://github.com/ShirkNeko)  

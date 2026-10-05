@@ -992,9 +992,9 @@ else
     CUSTOM_SUFFIX=""
 fi
 
-# Match unified naming: BakaSU_35114_LG_V60_AnyKernel3.zip
+# Match unified naming: LG_V60_BakaSU_35114_AnyKernel3.zip
 if [ $KSU_ENABLE -eq 1 ]; then
-    ZIP_FILENAME=BakaSU_${KSU_VERSION}_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
+    ZIP_FILENAME=LG_V60_BakaSU_${KSU_VERSION}${CUSTOM_SUFFIX}_AnyKernel3.zip
 else
     ZIP_FILENAME=NoKernelSU_LG_V60${CUSTOM_SUFFIX}_AnyKernel3.zip
 fi

@@ -1714,7 +1714,7 @@ jobs:
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
         with:
-          name: AnyKernel3_BakaSU_${{ env.KSUVER }}_${{ steps.extract_info.outputs.value }}(${{ env.CKERNEL_VERSION }})${{ steps.suffix.outputs.value }}
+          name: ${{ steps.extract_info.outputs.value }}_BakaSU_${{ env.KSUVER }}_AnyKernel3(${{ env.CKERNEL_VERSION }})${{ steps.suffix.outputs.value }}
           path: ./AnyKernel3/*
 
       - name: Extract and Process ZRAM Module
@@ -1785,7 +1785,7 @@ jobs:
           MODEL="${{ steps.extract_info.outputs.value }}"
           CKERNEL_VER="${{ env.CKERNEL_VERSION }}"
           FUNC_SUFFIX="${{ steps.suffix.outputs.value }}"
-          RELEASE_NAME="AnyKernel3_BakaSU_${KSU_VER}_${MODEL}(${CKERNEL_VER})${FUNC_SUFFIX}"
+          RELEASE_NAME="${MODEL}_BakaSU_${KSU_VER}_AnyKernel3(${CKERNEL_VER})${FUNC_SUFFIX}"
 
           mkdir -p release-assets
           cp -r ./AnyKernel3/* ./release-assets/ || true

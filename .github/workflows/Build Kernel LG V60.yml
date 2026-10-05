@@ -277,7 +277,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ inputs.ksu && format('BakaSU_{0}', env.KSUVER) || 'NoKernelSU' }}_LG_V60_AnyKernel3
+          name: ${{ inputs.ksu && format('LG_V60_BakaSU_{0}', env.KSUVER) || 'NoKernelSU_LG_V60' }}_AnyKernel3
           path: anykernel/*
           if-no-files-found: error
 

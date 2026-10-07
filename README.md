@@ -156,7 +156,7 @@ v3.1.7-自定义内容@builtin[f5541e21]
  
 - 使用`ccache-ECS`、`ltothin-cache`、`apt-cache`共同加速工作流,仅开启极速构建`fast build`有效,第一次使用、重大更新需要换`key`要重新生成`cache`,可能会降低速度  
 ```
-你可以通过使用delete.yml(name: Workflow and Cache Cleanup)工作流开启“是否删除所有缓存”的选项来删除所有的key
+你可以通过使用cleanup.yml(name: Workflow and Cache Cleanup — Faster)工作流开启“是否删除所有缓存”的选项来删除所有的key
 也可以去
 https://github.com/你的用户名(username)/你的仓库名/actions/caches
 直接手动删除对应的key

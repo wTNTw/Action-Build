@@ -85,6 +85,11 @@ on:
         required: true
         type: boolean
         default: true
+      nomount_ref:
+        description: "NoMount 版本（tag）。留空或 latest 表示自动跟随上游最新 release//NoMount version tag; empty or 'latest' follows the latest upstream release"
+        required: false
+        type: string
+        default: "latest"
 
 jobs:
   build:
@@ -178,6 +183,7 @@ jobs:
           IPV6_NAT: ${{ inputs.ipv6_nat }}
           UNICODE_BYPASS: ${{ inputs.unicode_bypass }}
           NOMOUNT: ${{ inputs.nomount }}
+          NOMOUNT_REF: ${{ inputs.nomount_ref }}
           ABI_REPORT: ${{ github.workspace }}/abi-report.txt
         run: |
           echo "=== Kernel Source Verification ==="

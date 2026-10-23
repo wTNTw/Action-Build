@@ -11,9 +11,18 @@ on:
         options:
           - timelm
           - nethunter
+      SUSFS_CI:
+        type: choice
+        description: "SUSFS模块下载调用方向//SUSFS module branch"
+        required: true
+        default: N/A
+        options:
+          - CI
+          - Release
+          - N/A
       KPM:
         type: choice
-        description: 'Kernel Module Implementation (KPM/KPN/N/A)'
+        description: "内核模块实现方式//Kernel module implementation method"
         required: true
         default: 'KPM'
         options:
@@ -30,6 +39,15 @@ on:
         description: 'Kernel Source Branch'
         required: true
         default: 'lineage-23.2'
+      # LG V60 的 SUSFS 已内置在 wTNTw/Resukisu-LG_V60 内核源码里（不像 OnePlus 那样
+      # clone susfs4ksu 打补丁），因此这里没有"补丁回退"可做：该参数在 LG V60 上的作用是
+      #   - 留空/普通值：下载并使用最新 SUSFS 模块（配合 SUSFS_CI）
+      #   - -1        ：关闭 SUSFS 模块下载（内核仍按源码自带版本构建）
+      SUSFS_META:
+        type: string
+        description: "回退SUSFS(输入哈希或次数或-1关闭)//Rollback SUSFS (Enter commit hash, count, or -1 to disable)"
+        required: false
+        default: ""
       BUILD_TIME:
         type: string
         description: 'Custom Build Time (F=UTCT or -1=disable)'
@@ -216,6 +234,35 @@ jobs:
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> "$GITHUB_ENV"
           echo "内核版本(2位): ${KERNEL_VERSION}"
           echo "upload=true" >> "$GITHUB_OUTPUT"
+      - name: Download Latest SUSFS Module from CI
+        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'CI' && inputs.SUSFS_META != '-1' }}
+        continue-on-error: true
+        run: |
+          mkdir -p ./anykernel
+          LATEST_RUN_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs?status=success&event=push" | \
+            jq -r '.workflow_runs[] | select(.head_branch == "v1.5.2+") | .id' | head -n 1)
+          if [ -z "$LATEST_RUN_ID" ]; then
+            echo "No successful run found for branch v1.5.2+"
+          else
+            ARTIFACT_URL=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs/$LATEST_RUN_ID/artifacts" | jq -r '.artifacts[0].archive_download_url')
+            if [ -n "$ARTIFACT_URL" ]; then
+              curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -o /tmp/ksu_module_susfs_1.5.2+_CI.zip "$ARTIFACT_URL"
+              cp /tmp/ksu_module_susfs_1.5.2+_CI.zip ./anykernel/
+            else
+              echo "Failed to fetch artifact URL"
+            fi
+          fi
+
+      - name: Download Latest SUSFS Module from Release
+        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'Release' && inputs.SUSFS_META != '-1' }}
+        continue-on-error: true
+        run: |
+          mkdir -p ./anykernel
+          wget -O /tmp/ksu_module_susfs_1.5.2+_Release.zip https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip
+          cp /tmp/ksu_module_susfs_1.5.2+_Release.zip ./anykernel/
+
       - name: Download BakaSU Manager APK
         if: ${{ inputs.ksu }}
         continue-on-error: true
@@ -302,7 +349,7 @@ jobs:
           ZIP_FILE=$(ls -1 *.zip 2>/dev/null | head -n1 || echo "")
           if [ -z "$ZIP_FILE" ]; then
             echo "No zip file found in workspace root. Trying anykernel/..."
-            ZIP_FILE=$(ls -1 anykernel/*.zip 2>/dev/null | head -n1 || echo "")
+            ZIP_FILE=$(ls -1 anykernel/*.zip 2>/dev/null | grep -v 'ksu_module_susfs' | head -n1 || echo "")
           fi
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No kernel zip found for Telegram publish"

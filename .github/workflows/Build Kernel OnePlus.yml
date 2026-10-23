@@ -1075,7 +1075,11 @@ jobs:
             NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
               "https://api.github.com/repos/maxsteeel/nomount/releases/latest" | \
               sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-            [ -n "$NOMOUNT_REF" ] || NOMOUNT_REF="v2.2.0"
+            if [ -z "$NOMOUNT_REF" ]; then
+              echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。"
+              echo "       如需固定版本，请显式设置 NOMOUNT_REF 输入（例如 v2.2.0）。"
+              exit 1
+            fi
           fi
           echo "=== Integrating NoMount ($NOMOUNT_REF) ==="
           if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then

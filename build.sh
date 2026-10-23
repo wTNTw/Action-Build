@@ -208,12 +208,16 @@ fi
 # 设备侧装同一最新版模块即可；如需固定，可显式传入具体 tag（如 v2.2.0）。
 # ==========================================================
 if [ "$NOMOUNT_ENABLE" = "true" ]; then
-    # 默认 latest：解析上游最新 release tag；API 不可用时回落到已知可用版本。
+    # 默认 latest：解析上游最新 release tag；解析失败则中止构建（不设兜底值）。
     if [ -z "$NOMOUNT_REF" ] || [ "$NOMOUNT_REF" = "latest" ]; then
         NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
             "https://api.github.com/repos/maxsteeel/nomount/releases/latest" 2>/dev/null |
             sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-        [ -n "$NOMOUNT_REF" ] || NOMOUNT_REF=v2.2.0
+        if [ -z "$NOMOUNT_REF" ]; then
+            echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。" >&2
+            echo "       如需固定版本，请显式传入 NOMOUNT_REF=<tag>（例如 v2.2.0）。" >&2
+            exit 1
+        fi
     fi
     echo "Integrating NoMount ($NOMOUNT_REF) into the kernel tree..."
     if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then

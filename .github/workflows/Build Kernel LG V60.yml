@@ -144,9 +144,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ccache_mikernel
-          key: kernel-ccache-ecs-${{ inputs.FILE }}-${{ inputs.script }}-${{ github.run_id }}
+          key: kernel-ccache-ecs-${{ inputs.FILE }}-${{ github.run_id }}
           restore-keys: |
-            kernel-ccache-ecs-${{ inputs.FILE }}-${{ inputs.script }}-
             kernel-ccache-ecs-${{ inputs.FILE }}-
             kernel-ccache-ecs-
       

@@ -157,11 +157,6 @@ on:
         description: "是否内核内置 NoMount（VFS 路径重定向，替代 OverlayFS/MagicMount）？需在设备侧另装同版本 NoMount 模块 ZIP//Build NoMount (VFS path redirection) into the kernel? Requires the matching NoMount module ZIP on device"
         required: true
         default: true
-      NOMOUNT_REF:
-        type: string
-        description: "NoMount 版本（tag）。留空或 latest 表示自动跟随上游最新 release//NoMount version tag; empty or 'latest' follows the latest upstream release"
-        required: false
-        default: "latest"
       SCHED_HMBIRD:
         type: boolean
         description: "是否添加风驰驱动1.0？//Add Fengchi (HMBIRD) Driver 1.0?"
@@ -1062,24 +1057,18 @@ jobs:
       # android16-6.12，而本线是自编 GKI（KMI_SYMBOL_LIST_STRICT_MODE=0 + 大量补丁），
       # LKM 的 CRC/vermagic 未必对得上，因此走内置：源码进 fs/nomount/，挂 fs/Makefile 与 fs/Kconfig。
       # 设备侧仍需另装**同版本**的 NoMount 模块 ZIP（metamount.sh 检测到内置后会跳过加载 LKM）。
-      # 版本默认 latest：构建时自动解析上游最新 release；也可通过 NOMOUNT_REF 输入固定。
+      # 始终使用上游最新 release；解析失败即中止构建。
       - name: Apply NoMount
         if: ${{ github.event.inputs.NOMOUNT == 'true' }}
-        env:
-          NOMOUNT_REF: ${{ github.event.inputs.NOMOUNT_REF }}
         run: |
           set -e
           cd kernel_workspace/kernel_platform/common
-          NOMOUNT_REF="${NOMOUNT_REF:-latest}"
-          if [ "$NOMOUNT_REF" = "latest" ] || [ -z "$NOMOUNT_REF" ]; then
-            NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
-              "https://api.github.com/repos/maxsteeel/nomount/releases/latest" | \
-              sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-            if [ -z "$NOMOUNT_REF" ]; then
-              echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。"
-              echo "       如需固定版本，请显式设置 NOMOUNT_REF 输入（例如 v2.2.0）。"
-              exit 1
-            fi
+          NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
+            "https://api.github.com/repos/maxsteeel/nomount/releases/latest" | \
+            sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+          if [ -z "$NOMOUNT_REF" ]; then
+            echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。"
+            exit 1
           fi
           echo "=== Integrating NoMount ($NOMOUNT_REF) ==="
           if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then

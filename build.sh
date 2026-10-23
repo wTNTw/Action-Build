@@ -112,7 +112,7 @@ CCM_ENABLE=${CCM:-false}
 IPV6_NAT_ENABLE=${IPV6_NAT:-false}
 UNICODE_BYPASS_ENABLE=${UNICODE_BYPASS:-false}
 NOMOUNT_ENABLE=${NOMOUNT:-false}
-NOMOUNT_REF=${NOMOUNT_REF:-latest}
+NOMOUNT_REF=latest
 
 # droid_spaces 及其细分开关已于 2026-09-10 整体移除。容器真正缺的是 IPC
 # namespace，而在这棵内核树上拿 IPC ns 必须打开 SYSVIPC 或 POSIX_MQUEUE，
@@ -204,20 +204,17 @@ fi
 # 设备侧还要另装**同版本**的 NoMount 模块 ZIP（NoMount-v<版本>-release.zip）：
 # 它的 metamount.sh 检测到内置支持后会跳过加载 LKM，只把 bin/nm 和 UID 规则
 # 用起来。内核侧与 bin/nm 走同一份 keyring 协议，**两边版本必须一致**。
-# 因此 NOMOUNT_REF 默认 latest —— 构建时自动解析上游最新 release tag，
-# 设备侧装同一最新版模块即可；如需固定，可显式传入具体 tag（如 v2.2.0）。
+# 因此构建时始终自动解析上游最新 release tag，设备侧装同一最新版模块即可
+# （不支持固定版本）。
 # ==========================================================
 if [ "$NOMOUNT_ENABLE" = "true" ]; then
-    # 默认 latest：解析上游最新 release tag；解析失败则中止构建（不设兜底值）。
-    if [ -z "$NOMOUNT_REF" ] || [ "$NOMOUNT_REF" = "latest" ]; then
-        NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
-            "https://api.github.com/repos/maxsteeel/nomount/releases/latest" 2>/dev/null |
-            sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-        if [ -z "$NOMOUNT_REF" ]; then
-            echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。" >&2
-            echo "       如需固定版本，请显式传入 NOMOUNT_REF=<tag>（例如 v2.2.0）。" >&2
-            exit 1
-        fi
+    # 始终使用上游最新 release tag；解析失败则中止构建（不提供固定版本）。
+    NOMOUNT_REF=$(curl -fsSL --retry 3 --max-time 30 \
+        "https://api.github.com/repos/maxsteeel/nomount/releases/latest" 2>/dev/null |
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+    if [ -z "$NOMOUNT_REF" ]; then
+        echo "ERROR: 无法解析 NoMount 最新版本（GitHub API 请求失败或被限流），构建中止。" >&2
+        exit 1
     fi
     echo "Integrating NoMount ($NOMOUNT_REF) into the kernel tree..."
     if [ -f fs/nomount/nomount.c ] && grep -q 'fs/nomount/Kconfig' fs/Kconfig; then

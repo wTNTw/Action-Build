@@ -108,11 +108,6 @@ on:
         description: "管理器分支名(必填)/内置分支名(必填)/自定义版本标识(留空不修改)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Custom version identifier (Leave blank to not modify) / Rollback branch commit hash version (Leave blank to not modify)"
         required: false
         default: "main/main//"
-      LZ4_UPDATE:
-        type: boolean
-        description: "是否升级LZ4到上游最新？//Upgrade LZ4 to the latest upstream?"
-        required: true
-        default: false
       ZRAM:
         type: string
         description: "ZRAM(0关闭1开启)/算法名/大小//ZRAM (0: disable, 1: enable) / Algorithm name / Size"
@@ -124,9 +119,15 @@ on:
         required: false
         default: ""
       RESUBLEVEL:
+        type: string
         description: "自定义内核等级欺骗(SUBLEVEL)//Custom kernel SUBLEVEL spoofing"
         required: false
         default: ""
+      LZ4_UPDATE:
+        type: boolean
+        description: "是否升级LZ4到上游最新？//Upgrade LZ4 to the latest upstream?"
+        required: true
+        default: false
       FAST_BUILD:
         type: boolean
         description: "是否启用极速构建？//Enable ultra-fast build?"
@@ -1994,12 +1995,12 @@ jobs:
           gh workflow run "Build Kernel LG V60.yml" --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
             -f kernel_repo="wTNTw/Resukisu-LG_V60" \
             -f kernel_branch="lineage-23.2" \
-            -f device="timelm" \
+            -f FILE="timelm" \
             -f ksu=true \
-            -f kpm=KPM \
-            -f re_kernel=true \
-            -f netfilter=true \
-            -f ccm=true
+            -f KPM=KPM \
+            -f RE_KERNEL=true \
+            -f NETFILTER=true \
+            -f CCM=true
           echo "✅ LG V60 workflow triggered successfully"
 
       - name: Check Cache Size Before Save

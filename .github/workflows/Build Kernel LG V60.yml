@@ -3,92 +3,92 @@ name: Build Kernel LG V60
 on:
   workflow_dispatch:
     inputs:
-      kernel_repo:
-        description: 'Kernel Source Repository'
-        required: true
-        default: 'wTNTw/Resukisu-LG_V60'
-        type: string
-      kernel_branch:
-        description: 'Kernel Source Branch'
-        required: true
-        default: 'lineage-23.2'
-        type: string
-      device:
+      FILE:
+        type: choice
         description: 'Target Device Codename'
         required: true
         default: 'timelm'
-        type: choice
         options:
           - timelm
           - nethunter
-      ksu:
-        description: 'Enable KernelSU (BakaSU-SuSFS)'
-        required: true
-        type: boolean
-        default: true
-      ksu_meta:
-        description: "管理器分支名(必填)/内置分支名(必填)/自定义版本标识(留空不修改)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Custom version identifier (Leave blank to not modify) / Rollback branch commit hash version (Leave blank to not modify)"
-        required: false
-        type: string
-        default: "main/main//"
-      kpm:
+      KPM:
+        type: choice
         description: 'Kernel Module Implementation (KPM/KPN/N/A)'
         required: true
-        type: choice
         default: 'KPM'
         options:
           - KPM
           - KPN
           - N/A
-      re_kernel:
-        description: 'Enable Re:Kernel?'
+      kernel_repo:
+        type: string
+        description: 'Kernel Source Repository'
         required: true
-        type: boolean
-        default: true
-      netfilter:
-        description: 'Enable Network Extensions (NETFILTER)?'
+        default: 'wTNTw/Resukisu-LG_V60'
+      kernel_branch:
+        type: string
+        description: 'Kernel Source Branch'
         required: true
-        type: boolean
-        default: true
-      build_time:
+        default: 'lineage-23.2'
+      BUILD_TIME:
+        type: string
         description: 'Custom Build Time (F=UTCT or -1=disable)'
         required: false
-        type: string
         default: ''
-      suffix:
-        description: 'Custom Kernel Suffix (empty=random or -1=disable)'
+      KSU_META:
+        type: string
+        description: "管理器分支名(必填)/内置分支名(必填)/自定义版本标识(留空不修改)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Custom version identifier (Leave blank to not modify) / Rollback branch commit hash version (Leave blank to not modify)"
         required: false
+        default: "main/main//"
+      ZRAM:
         type: string
-        default: ''
-      ccm:
-        description: 'Enable Network Congestion Control (BBRv1+ECN)? (SAFE)'
-        required: true
-        type: boolean
-        default: true
-      zram:
         description: "ZRAM(0关闭1开启)/算法名/大小//ZRAM (0: disable, 1: enable) / Algorithm name / Size"
         required: true
-        type: string
         default: "1/lz4kd/4294967296"
-      ipv6_nat:
-        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
-        required: true
+      SUFFIX:
+        type: string
+        description: 'Custom Kernel Suffix (empty=random or -1=disable)'
+        required: false
+        default: ''
+      ksu:
         type: boolean
+        description: 'Enable KernelSU (BakaSU-SuSFS)'
+        required: true
         default: true
-      unicode_bypass:
+      NETFILTER:
+        type: boolean
+        description: 'Enable Network Extensions (NETFILTER)?'
+        required: true
+        default: true
+      CCM:
+        type: boolean
+        description: 'Enable Network Congestion Control (BBRv1+ECN)? (SAFE)'
+        required: true
+        default: true
+      UNICODE_BYPASS:
+        type: boolean
         description: "是否添加Unicode不可见字码点绕过读取漏洞修复？//Add patch for Unicode invisible code point read bypass vulnerability?"
         required: true
-        type: boolean
         default: true
-      nomount:
+      NOMOUNT:
+        type: boolean
         description: "是否内置 NoMount（VFS 路径重定向，替代 OverlayFS/MagicMount）？需在设备侧另装同版本 NoMount 模块 ZIP//Integrate NoMount (VFS path redirection) into the kernel? Requires the matching NoMount module ZIP on device"
         required: true
+        default: true
+      RE_KERNEL:
         type: boolean
+        description: 'Enable Re:Kernel?'
+        required: true
+        default: true
+      ipv6_nat:
+        type: boolean
+        description: 'IPv6 NAT/Redirect (IP6_NF_NAT/MASQUERADE/REDIRECT/NPT)？默认关闭，需刷入后自行验证'
+        required: true
         default: true
 
 jobs:
   build:
-    name: Build Kernel for ${{ inputs.device }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})${{ startsWith(inputs.zram, '1/') && ' [ZRAM]' || '' }}
+    name: Build Kernel for ${{ inputs.FILE }} (${{ inputs.ksu && 'KSU' || 'NoKSU' }})${{ startsWith(inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -113,7 +113,7 @@ jobs:
       - name: Parse ZRAM option
         id: zram_opt
         run: |
-          ZRAM="${{ inputs.zram }}"
+          ZRAM="${{ inputs.ZRAM }}"
           if [[ "$ZRAM" != 1* ]]; then
             echo "ZRAM 关闭（输入: $ZRAM）"
             echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -144,10 +144,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ccache_mikernel
-          key: kernel-ccache-ecs-${{ inputs.device }}-${{ inputs.script }}-${{ github.run_id }}
+          key: kernel-ccache-ecs-${{ inputs.FILE }}-${{ inputs.script }}-${{ github.run_id }}
           restore-keys: |
-            kernel-ccache-ecs-${{ inputs.device }}-${{ inputs.script }}-
-            kernel-ccache-ecs-${{ inputs.device }}-
+            kernel-ccache-ecs-${{ inputs.FILE }}-${{ inputs.script }}-
+            kernel-ccache-ecs-${{ inputs.FILE }}-
             kernel-ccache-ecs-
       
       - name: Download and Extract Android NDK
@@ -168,16 +168,16 @@ jobs:
       
       - name: Build Kernel
         env:
-          KPM_OPTION: ${{ inputs.kpm }}
-          KSU_META: ${{ inputs.ksu_meta }}
-          RE_KERNEL: ${{ inputs.re_kernel }}
-          NETFILTER: ${{ inputs.netfilter }}
-          BUILD_TIME: ${{ inputs.build_time }}
-          SUFFIX: ${{ inputs.suffix }}
-          CCM: ${{ inputs.ccm }}
+          KPM_OPTION: ${{ inputs.KPM }}
+          KSU_META: ${{ inputs.KSU_META }}
+          RE_KERNEL: ${{ inputs.RE_KERNEL }}
+          NETFILTER: ${{ inputs.NETFILTER }}
+          BUILD_TIME: ${{ inputs.BUILD_TIME }}
+          SUFFIX: ${{ inputs.SUFFIX }}
+          CCM: ${{ inputs.CCM }}
           IPV6_NAT: ${{ inputs.ipv6_nat }}
-          UNICODE_BYPASS: ${{ inputs.unicode_bypass }}
-          NOMOUNT: ${{ inputs.nomount }}
+          UNICODE_BYPASS: ${{ inputs.UNICODE_BYPASS }}
+          NOMOUNT: ${{ inputs.NOMOUNT }}
           ABI_REPORT: ${{ github.workspace }}/abi-report.txt
         run: |
           echo "=== Kernel Source Verification ==="
@@ -186,10 +186,10 @@ jobs:
           echo "=== Building Kernel ==="
           if [ "${{ inputs.ksu }}" == "true" ]; then
             echo "Building with KernelSU..."
-            bash build.sh ${{ inputs.device }} ksu
+            bash build.sh ${{ inputs.FILE }} ksu
           else
             echo "Building without KernelSU..."
-            bash build.sh ${{ inputs.device }}
+            bash build.sh ${{ inputs.FILE }}
           fi
       
       - name: Prepare ZRAM module
@@ -335,7 +335,7 @@ jobs:
           fi
 
           BUILD_DATE_BEIJING=$(TZ='Asia/Shanghai' date +"%a %b %d %T %Z %Y")
-          DEVICE="${{ inputs.device }}"
+          DEVICE="${{ inputs.FILE }}"
           BRANCH="${{ github.ref_name }}"
 
           escape_mdv2() {
@@ -363,7 +363,7 @@ jobs:
 
           # ZRAM 模块（可选）：与内核装进同一个相册消息发出（同 OnePlus 的 sendMediaGroup）
           ZRAM_FILE=""
-          if [[ "${{ inputs.zram }}" == 1* ]] && [ -d "./ZRAM-Module" ]; then
+          if [[ "${{ inputs.ZRAM }}" == 1* ]] && [ -d "./ZRAM-Module" ]; then
             ZRAM_ZIP_NAME="ZRAM-Module_${TELEGRAM_ZIP_NAME%.zip}.zip"
             ( cd ZRAM-Module && zip -qr "../${ZRAM_ZIP_NAME}" ./* )
             if [ -f "${ZRAM_ZIP_NAME}" ]; then

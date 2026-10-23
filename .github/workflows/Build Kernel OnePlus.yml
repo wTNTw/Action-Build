@@ -1996,6 +1996,7 @@ jobs:
             -f kernel_repo="wTNTw/Resukisu-LG_V60" \
             -f kernel_branch="lineage-23.2" \
             -f FILE="timelm" \
+            -f SUSFS_CI="${{ github.event.inputs.SUSFS_META != '-1' && github.event.inputs.SUSFS_CI || 'N/A' }}" \
             -f ksu=true \
             -f KPM=KPM \
             -f RE_KERNEL=true \

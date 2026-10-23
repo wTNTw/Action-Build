@@ -40,14 +40,7 @@ on:
         required: true
         default: 'lineage-23.2'
       # LG V60 的 SUSFS 已内置在 wTNTw/Resukisu-LG_V60 内核源码里（不像 OnePlus 那样
-      # clone susfs4ksu 打补丁），因此这里没有"补丁回退"可做：该参数在 LG V60 上的作用是
-      #   - 留空/普通值：下载并使用最新 SUSFS 模块（配合 SUSFS_CI）
-      #   - -1        ：关闭 SUSFS 模块下载（内核仍按源码自带版本构建）
-      SUSFS_META:
-        type: string
-        description: "回退SUSFS(输入哈希或次数或-1关闭)//Rollback SUSFS (Enter commit hash, count, or -1 to disable)"
-        required: false
-        default: ""
+      # clone susfs4ksu 打补丁），没有补丁可回退；这里只提供 SUSFS 模块的下载方向。
       BUILD_TIME:
         type: string
         description: 'Custom Build Time (F=UTCT or -1=disable)'
@@ -235,7 +228,7 @@ jobs:
           echo "内核版本(2位): ${KERNEL_VERSION}"
           echo "upload=true" >> "$GITHUB_OUTPUT"
       - name: Download Latest SUSFS Module from CI
-        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'CI' && inputs.SUSFS_META != '-1' }}
+        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'CI' }}
         continue-on-error: true
         run: |
           mkdir -p ./anykernel
@@ -256,7 +249,7 @@ jobs:
           fi
 
       - name: Download Latest SUSFS Module from Release
-        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'Release' && inputs.SUSFS_META != '-1' }}
+        if: ${{ inputs.ksu && inputs.SUSFS_CI == 'Release' }}
         continue-on-error: true
         run: |
           mkdir -p ./anykernel

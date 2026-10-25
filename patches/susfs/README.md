@@ -28,16 +28,16 @@
 
 ## 0003 为什么要按 KSU 分支决定
 
-`build.sh` 会 grep `KernelSU/` 里有没有 `susfs_set_current_proc_no_su`：
+`build.sh` 会 grep `KernelSU/` 里有没有 `susfs_set_current_proc_no_su`，有才应用 0003，
+没有就跳过（否则 `no_su` 永不为真，stat/faccessat 的 SUSFS 重定向会被整体绕过）。
 
-- BakaSU `main`：只有 `susfs_set_current_proc_umounted()` → **跳过 0003**。
-  否则 `no_su` 永不为真，stat/faccessat 的 SUSFS 重定向会被整体绕过。
-- BakaSU `sync-susfs`（已同步 2.3.0 KSU 侧）：`no_su` 与 `zygote_next` 都有 →
-  应用 0003，快路径与上游一致。
+- BakaSU `main`：**有**（`kernel/hook/setuid_hook.c`、`kernel/feature/sucompat.h`）→ 应用 0003。
+  实测 run `40163464027`（默认 `KSU_META=main/main//`）日志为 `no_su supported: true`，
+  三个补丁全部 applied，BakaSU 自身打印 `-- SUSFS_VERSION: v2.3.0`。
+- 若将来换用不支持 `no_su` 的 KSU 分支，0003 会自动跳过，构建仍然成功，
+  只是快路径退回旧的 `umounted` 语义。
 
-所以想吃满 2.3.0（含 zygote_next 隐藏），构建时把 `KSU_META` 的内置分支指向
-`sync-susfs`，例如 `main/sync-susfs//`；用 `main/main//` 也能构建，只是
-0003 会被跳过、`no_su` 快路径保持旧的 `umounted` 语义。
+这段检测保留为安全网：它让补丁集对"KSU 侧是否已支持 2.3.0 语义"自适应。
 
 ## 加新补丁
 

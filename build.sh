@@ -197,10 +197,10 @@ fi
 #     fs/proc/task_mmu.c / fs/namei.c 已是 2.3.0 级实现，无需改；
 #   - 真正缺的只有三项，即下面的 0001/0002/0003。
 #
-# 0003 依赖 KSU 侧置位 TIF_PROC_NO_SU：BakaSU main 只置 umounted，
-# sync-susfs 分支才置 no_su。因此按 KernelSU/ 源码里有没有
-# susfs_set_current_proc_no_su 决定是否应用——否则快路径永远不成立，
-# 反而会关掉 stat/faccessat 的 SUSFS 重定向。
+# 0003 依赖 KSU 侧置位 TIF_PROC_NO_SU：若 KSU 不支持还用 no_su，快路径永远
+# 不成立，反而会关掉 stat/faccessat 的 SUSFS 重定向。因此按 KernelSU/ 源码里
+# 有没有 susfs_set_current_proc_no_su 决定是否应用（BakaSU main 有，在
+# kernel/hook/setuid_hook.c；没有的分支则跳过，保持旧的 umounted 语义）。
 #
 # 补丁不存在则跳过（例如旧分支）；存在但应用失败说明内核树基线已变，
 # 直接中止构建而不是带着半升级状态继续编译。

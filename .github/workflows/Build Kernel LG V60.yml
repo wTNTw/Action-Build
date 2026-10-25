@@ -120,6 +120,27 @@ jobs:
           chmod +x build.sh
           echo "=== Downloaded build.sh ==="
           ls -lh build.sh
+
+      - name: Download SUSFS Patches
+        run: |
+          # SUSFS 内核侧升级补丁随本仓库维护，清单见 patches/susfs/INDEX
+          BRANCH="${{ github.ref_name }}"
+          mkdir -p susfs_patches
+          if ! curl -fsSL -o /tmp/susfs-index \
+            "https://raw.githubusercontent.com/wTNTw/Action-Build/$BRANCH/patches/susfs/INDEX"; then
+            echo "分支 $BRANCH 上没有 SUSFS 补丁清单，跳过（SUSFS 保持内核自带版本）"
+            rmdir susfs_patches 2>/dev/null || true
+            exit 0
+          fi
+          while IFS= read -r line; do
+            case "$line" in ''|'#'*) continue ;; esac
+            name=$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -n "$name" ] || continue
+            echo "=== Downloading $name ==="
+            curl -fsSL -o "susfs_patches/$name" \
+              "https://raw.githubusercontent.com/wTNTw/Action-Build/$BRANCH/patches/susfs/$name"
+          done < /tmp/susfs-index
+          ls -l susfs_patches
       
       - name: Parse ZRAM option
         id: zram_opt

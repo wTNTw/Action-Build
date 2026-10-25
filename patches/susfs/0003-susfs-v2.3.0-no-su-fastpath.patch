@@ -1,0 +1,45 @@
+# SUSFS 2.3.0: use the no_su fast-path flag at the KSU hook sites.
+#
+# Upstream v2.3.0 switched these fast paths from TIF_PROC_UMOUNTED to
+# TIF_PROC_NO_SU. Only apply when the built-in KernelSU sets that flag
+(BakaSU main does not, BakaSU sync-susfs does) - build.sh gates this patch.
+#
+diff --git a/fs/exec.c b/fs/exec.c
+index 78172eb..b1fefc6 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1794,7 +1794,7 @@ static int __do_execve_file(int fd, struct filename *filename,
+ 	if (IS_ERR(filename))
+ 		return PTR_ERR(filename);
+ #ifdef CONFIG_KSU_SUSFS
+-	if (likely(susfs_is_current_proc_umounted()))
++	if (likely(susfs_is_current_proc_no_su()))
+ 		goto orig_flow;
+ 	if (static_branch_likely(&ksu_su_compat_enabled)) {
+ 		if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted))
+diff --git a/fs/open.c b/fs/open.c
+index ef6ec15..0de81ee 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -392,7 +392,7 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
+ #endif
+ 
+ #ifdef CONFIG_KSU_SUSFS
+-	if (likely(susfs_is_current_proc_umounted()))
++	if (likely(susfs_is_current_proc_no_su()))
+ 		goto orig_flow;
+ 	if (static_branch_likely(&ksu_su_compat_enabled))
+ 		if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val))) {
+diff --git a/fs/stat.c b/fs/stat.c
+index 36d614a..c6231a8 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -213,7 +213,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ #endif
+ 
+ #ifdef CONFIG_KSU_SUSFS
+-	if (likely(susfs_is_current_proc_umounted()))
++	if (likely(susfs_is_current_proc_no_su()))
+ 		goto orig_flow;
+ 	if (static_branch_likely(&ksu_su_compat_enabled)) {
+ 		if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val))) {

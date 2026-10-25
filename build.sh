@@ -186,6 +186,58 @@ else
 fi
 
 # ==========================================================
+# SUSFS 内核侧升级（独立补丁，本仓库维护）
+# ----------------------------------------------------------
+# LG V60 的内核（wTNTw/Resukisu-LG_V60）自带 SUSFS，但 SUSFS 代码跟着内核
+# 仓库走，想升级就得改内核仓库。这里把"补齐到上游 v2.3.0"的差异抽成独立
+# 补丁，由 workflow 下载到 ./susfs_patches/，构建时按文件名顺序 apply。
+#
+# 现状核对（对照 simonpunk/susfs4ksu gki-android12-5.10 @ fb16b41）：
+#   - fs/susfs.c / include/linux/susfs_def.h / fs/proc_namespace.c /
+#     fs/proc/task_mmu.c / fs/namei.c 已是 2.3.0 级实现，无需改；
+#   - 真正缺的只有三项，即下面的 0001/0002/0003。
+#
+# 0003 依赖 KSU 侧置位 TIF_PROC_NO_SU：BakaSU main 只置 umounted，
+# sync-susfs 分支才置 no_su。因此按 KernelSU/ 源码里有没有
+# susfs_set_current_proc_no_su 决定是否应用——否则快路径永远不成立，
+# 反而会关掉 stat/faccessat 的 SUSFS 重定向。
+#
+# 补丁不存在则跳过（例如旧分支）；存在但应用失败说明内核树基线已变，
+# 直接中止构建而不是带着半升级状态继续编译。
+# ==========================================================
+SUSFS_PATCH_DIR="${SUSFS_PATCH_DIR:-./susfs_patches}"
+if [ -d "$SUSFS_PATCH_DIR" ]; then
+    SUSFS_NO_SU_SUPPORTED=false
+    if [ -d KernelSU ] && grep -rqs 'susfs_set_current_proc_no_su' KernelSU; then
+        SUSFS_NO_SU_SUPPORTED=true
+    fi
+    echo "Applying SUSFS upgrade patches from $SUSFS_PATCH_DIR (no_su supported: $SUSFS_NO_SU_SUPPORTED)"
+    for susfs_patch in "$SUSFS_PATCH_DIR"/*.patch; do
+        [ -e "$susfs_patch" ] || continue
+        susfs_patch_name=$(basename "$susfs_patch")
+        case "$susfs_patch_name" in
+            0003-*)
+                if [ "$SUSFS_NO_SU_SUPPORTED" != "true" ]; then
+                    echo "  skip $susfs_patch_name: 内置 KernelSU 不置位 TIF_PROC_NO_SU"
+                    continue
+                fi
+                ;;
+        esac
+        if git apply --check "$susfs_patch" >/dev/null 2>&1; then
+            git apply "$susfs_patch"
+            echo "  applied $susfs_patch_name"
+        elif git apply --reverse --check "$susfs_patch" >/dev/null 2>&1; then
+            echo "  already applied: $susfs_patch_name"
+        else
+            echo "错误: SUSFS 补丁 $susfs_patch_name 无法应用（内核树基线已变化），构建中止。" >&2
+            exit 1
+        fi
+    done
+else
+    echo "SUSFS 补丁目录不存在（$SUSFS_PATCH_DIR），跳过 SUSFS 升级"
+fi
+
+# ==========================================================
 # NoMount 内核集成（可选，默认关；workflow 输入 nomount）
 # ----------------------------------------------------------
 # 上游：maxsteeel/nomount。它做的不是挂载，而是在 VFS 层劫持目标

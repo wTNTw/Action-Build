@@ -1,0 +1,5 @@
+# SUSFS 内核侧补丁清单：按此顺序应用，workflow 会按本清单下载文件
+# 新增补丁时把它加到末尾，并在 README.md 里写清适用基线
+0001-susfs-v2.3.0-version.patch
+0002-susfs-v2.3.0-zygote-next-mnt-hook.patch
+0003-susfs-v2.3.0-no-su-fastpath.patch

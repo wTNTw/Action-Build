@@ -95,6 +95,8 @@
 
 - LG V60：移除 `droid_spaces` 与全部 `ds_*` 构建开关——在必须加载 stock `/vendor` 模块的前提下它拿不到容器真正需要的 IPC namespace（`SYSVIPC`/`POSIX_MQUEUE` 会破坏 ABI、被 guard 拒绝），保留下来的配置部分不构成可用特性；需要时可按文档手动加回
  
+- 新增`SusfsCompat.kts`处理`susfs`兼容以及`SusfsContext.kts`自动处理`susfs`上下文期望异常  
+ 
 - 新增`FakeConfig(HideConfig)`，用于隐藏`proc/config.gz`内配置项可见性  
 ```
 普通配置项:
@@ -102,8 +104,6 @@ set_config "CONFIG_IP_NF_TARGET_ECN=y"
 隐藏配置项:
 set_hide_config "CONFIG_IP6_NF_NAT=y"
 ```  
- 
-- 新增`FakePatch`完善多内核等级与`susfs`的兼容问题  
  
 - 新增路径递推,完整适配内核版本`6.12+`的`Rust`构建逻辑和`bindgen`、`Kleaf`依赖搜索  
  
